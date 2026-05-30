@@ -222,3 +222,59 @@ Append-only running memory of the VectorScape build. Read first, append always.
 - `app/embeddings.py` still ignores unknown `embed_model` strings (uses the local default unless the value is literally `"openai"`). Not in this prompt's scope; flagging because the discovery surfaced during error-path testing.
 
 **Next:** Prompt 5 — wire the web app to the reducer (upload UI → POST /embed-reduce → poll /status → render in `<VectorScape>`).
+
+---
+
+## 2026-05-30 — Prompt 5: web sandbox upload flow (no 3D yet)
+
+**What:** Wired Supabase Auth (magic link), built the `/sandbox` upload UI in `apps/web`, and connected it to the reducer via server-side API routes. An authenticated user can upload a CSV, preview rows, pick the text column, and watch a project reach `ready` with `points` rows in the DB. Errors from the reducer surface as a clear status panel. No 3D rendering yet — that's the next prompt.
+
+**Files added/changed:**
+
+- `supabase/migrations/20260530140000_csv_uploads_bucket.sql` — creates the private `csv-uploads` bucket and four `storage.objects` RLS policies (select/insert/update/delete) that pin each user to a `<auth.uid()>/...` folder prefix via `storage.foldername(name)[1]`. Applied to the cloud project with `supabase db push`.
+- `apps/web/package.json` — added `@supabase/supabase-js@2.106.2`, `@supabase/ssr@0.10.3`, `papaparse@5.5.3`, and `@types/papaparse@5.5.2`.
+- `apps/web/lib/supabase/client.ts` — `createSupabaseBrowserClient` (`createBrowserClient` from `@supabase/ssr`).
+- `apps/web/lib/supabase/server.ts` — `createSupabaseServerClient` reading/writing cookies from `next/headers` and a `createSupabaseServiceClient` for RLS-bypassing service-role work (lazy `require('@supabase/supabase-js')` so the browser bundle never sees the service key).
+- `apps/web/lib/supabase/middleware.ts` + `apps/web/middleware.ts` — refreshes Supabase auth cookies on every non-static request via `supabase.auth.getUser()`.
+- `apps/web/app/login/page.tsx` + `LoginForm.tsx` — server page that redirects already-signed-in users to `next || /sandbox`; client form calls `supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: <origin>/auth/callback?next=... } })`.
+- `apps/web/app/auth/callback/route.ts` — exchanges the OTP `code` in the magic-link URL for a cookie session via `supabase.auth.exchangeCodeForSession(code)`, then redirects to `next`.
+- `apps/web/app/auth/signout/route.ts` — `POST` route that signs out and 303-redirects to `/login`.
+- `apps/web/app/sandbox/page.tsx` — server component, requires a session (redirects to `/login?next=/sandbox` otherwise), renders `SandboxUI`.
+- `apps/web/app/sandbox/SandboxUI.tsx` — client component. Drop zone + file picker, parses CSV with papaparse (header inferred), shows the first 50 rows in a table with the chosen text column highlighted, auto-guesses the text column (preferred names → widest by avg length), exposes a column picker + project-name input, submits as `multipart/form-data` to `/api/projects`, then polls `/api/projects/{id}/status` every 2s until terminal. Status panel renders pending/reducing as a progress bar with `{stage, pct}` from the reducer's Redis side-channel, `ready` as a "N points written" success, and `error` as a red panel with `error_message`.
+- `apps/web/app/api/projects/route.ts` — Node runtime POST handler. Verifies session, fetches `tenant_id` via the user's RLS-scoped `profiles` select (no service-role on the user path), parses the CSV server-side, uploads bytes to `csv-uploads/<user_id>/<project_id>/<filename>` under the user's session (Storage RLS enforces the folder prefix), inserts a `projects` row with explicit `id` and `tenant_id` (RLS enforces tenant match), then `POST`s to `${REDUCER_URL}/embed-reduce` with `project_id`, `tenant_id`, parsed rows, `text_column`, and `reducer`. Rolls back the uploaded object if the project insert fails; flips the project to `error` and returns 502 if the reducer call fails.
+- `apps/web/app/api/projects/[id]/status/route.ts` — verifies session, does a tenant-scoped `projects.select('id')` so a foreign id returns 404 (not 403), proxies `${REDUCER_URL}/status/{id}` back to the client.
+- `apps/web/app/page.tsx` — landing page now links to `/sandbox` (or `/login?next=/sandbox` for anon).
+- `apps/web/next.config.ts` — loads `.env` from the monorepo root at config time (Next.js otherwise only reads `apps/web/.env*`), then forwards the two `NEXT_PUBLIC_SUPABASE_*` vars through `env` so the browser bundle sees them.
+- `.env.example` + `.env` — added `REDUCER_URL=http://127.0.0.1:8000`.
+
+**Decisions / deviations:**
+
+- **Auth = magic link** per the picker. Email + password would have worked locally with zero email infra, but the spec requested magic link UX; Supabase's hosted SMTP handles dev-project sends without setup.
+- **Tenant resolution stays server-side.** The web app reads `tenant_id` from `profiles` inside `/api/projects` using the user's session, then passes it to the reducer as the explicit `tenant_id` field. The reducer uses service-role and bypasses RLS, so it needs the tenant id from a trusted source — the user's own profile row, RLS-gated on `user_id = auth.uid()`, is that source. The browser never sees or sets `tenant_id`.
+- **CSV is parsed twice (client preview, server submit).** Sending the parsed JSON alongside the multipart blob would have shaved one parse but doubled the wire size; bytes-only multipart keeps the request small and lets the server re-validate. papaparse is fast enough that this isn't a bottleneck at sandbox sizes.
+- **Project-id is generated in the web app, not by Postgres.** Lets us name the Storage path (`<user>/<project_id>/<file>`) before the row exists, which keeps the upload + insert + reducer-dispatch sequence trivially recoverable: if the insert fails we delete the object; if the reducer fails we flip the row.
+- **Polling, not realtime, for status.** Supabase Realtime would be cooler but adds a websocket channel + subscription teardown. Polling every 2s against `/api/projects/{id}/status` is plenty for a sandbox where typical jobs finish in seconds-to-tens-of-seconds. The reducer's Redis-backed progress is already published; the polling endpoint just relays it.
+- **`next.config.ts` loads the root `.env`.** Without this, the middleware fails immediately with "Your project's URL and Key are required" because Next.js scopes `.env` reads to the project directory. Symlinking `.env` was the alternative but a 15-line loader is more explicit, doesn't depend on filesystem symlinks, and survives `cp -r`.
+- **Storage RLS uses `(storage.foldername(name))[1] = auth.uid()::text`.** The official Supabase pattern. Service-role bypasses these, which the reducer relies on (it reads the file indirectly via the rows in its request body — it doesn't need to download from Storage, the bucket is just durable archival for the raw upload).
+- **Sandbox UI is intentionally renderless.** No `@react-three/*` imports anywhere in this prompt — that lands in the next prompt where `<VectorScape>` consumes the points rows.
+
+**Verified (cloud, end-to-end):**
+
+A scripted probe (created a confirmed user via admin API, signed in with a temporary password to obtain a real session, base64-encoded the session into the `sb-<ref>-auth-token` cookie that `@supabase/ssr` expects, then drove the actual `/api/projects` + `/api/projects/{id}/status` routes) exercised the whole flow:
+
+1. Admin-created user `e2e+xxx@vectorscape.test` → `handle_new_user` trigger materialized a profile with a fresh tenant_id.
+2. `POST /api/projects` (multipart, 30-row CSV, `text_column=body`) → 200, `{project_id, mode: "sync", row_count: 30, storage_path: "<uid>/<pid>/e2e.csv"}`.
+3. `GET /api/projects/{id}/status` → `status: "ready"`, `point_count: 30`, `error_message: null`.
+4. DB check (service-role): 30 rows in `points` with the right `project_id`, project row `status=ready`, `tenant_id` matched the user's profile.
+5. Storage check: object present at `csv-uploads/<uid>/<pid>/e2e.csv`.
+6. Error path: same flow with `reducer="definitely-not-a-reducer"` → `/api/projects` returned 502 with body `{"error":"reducer error (500): {\"detail\":\"ValueError: unknown reducer: definitely-not-a-reducer\"}"}`. The submit-error panel in `SandboxUI` renders that string. Project row flipped to `status=error` server-side; if the user re-runs without changing the param, the polling status panel surfaces the same message under "Reduction failed."
+
+Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-link sent state after submit; `/sandbox` redirects to `/login?next=/sandbox` when not signed in.
+
+**Unfinished / broken:**
+
+- No headless browser run for the visual flow (no Playwright in the project yet); the scripted probe drove the routes directly.
+- `app/api/projects/route.ts` updates `status='error'` via the SSR client on the 502 path but doesn't write `error_message` itself — the reducer's own try/except has already written both in the same DB on the sync path, so this is harmless; on a network-level failure where the reducer never set status, the UI sees the 502 body but the DB row has `status=error` with `error_message=null`. Acceptable for the sandbox; could be tightened later.
+- Magic-link sign-in needs SMTP on the Supabase project. Hosted Supabase ships a default sender with low limits — fine for dev, will need a configured SMTP provider before any public exposure.
+
+**Next:** Prompt 6 — render the points in `<VectorScape>` inside `/sandbox` (or `/sandbox/{project_id}`), with a fly-to-cluster sidebar.
