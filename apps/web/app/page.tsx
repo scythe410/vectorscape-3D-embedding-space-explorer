@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import HeroGalaxyMount from "./HeroGalaxyMount";
+import XRWaitlist from "./XRWaitlist";
 
 export default async function Home() {
   const supabase = await createSupabaseServerClient();
@@ -91,18 +92,8 @@ export default async function Home() {
       </section>
 
       {/* XR coming soon — honest framing per design.md "framed honestly". */}
-      <section className="relative z-10 mx-auto max-w-3xl px-6 pb-28 text-center">
-        <div className="mx-auto inline-flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-black/30 px-10 py-8 backdrop-blur-md">
-          <p className="font-mono text-[10px] uppercase tracking-[0.32em] text-accent/80">
-            Coming next
-          </p>
-          <p className="font-display text-2xl text-neutral-100">
-            Step inside on Quest &amp; Vision&nbsp;Pro
-          </p>
-          <p className="max-w-md text-sm text-neutral-400">
-            The same galaxy, at room scale. Waitlist opening soon.
-          </p>
-        </div>
+      <section className="relative z-10 mx-auto max-w-3xl px-6 pb-28">
+        <XRWaitlist />
       </section>
 
       <footer className="relative z-10 mx-auto max-w-6xl px-6 pb-8 text-center font-mono text-[10px] uppercase tracking-[0.22em] text-neutral-600">

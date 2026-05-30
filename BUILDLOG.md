@@ -466,3 +466,46 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 - The cited-point fly-to uses a fixed `radius=2.5` framing. Looks right at the engine's default `COORD_SCALE=60`; at very different scales it would over-zoom or under-zoom. Acceptable since the reducer always normalizes to scale 60.
 
 **Next:** Prompt 11 — XR waitlist section + email capture into `waitlist`; honest "coming soon" framing for Quest + Vision Pro.
+
+---
+
+## 2026-05-31 — Prompt 11: XR waitlist (Quest + Vision Pro)
+
+**What:** Replaced the decorative "Waitlist opening soon" block on the landing with a real waitlist form. Quest / Vision Pro picker + email field; submissions land in `public.waitlist` with `platform` set correctly. Honest framing per CLAUDE.md / design.md: "VectorScape runs in your browser today. Native headset apps are in development — no ship date yet."
+
+**Files added/changed:**
+
+- `apps/web/app/api/waitlist/route.ts` — new POST. Parses JSON, trims+lowercases email, validates against `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` with a 254-char cap, validates `platform ∈ {quest, vision_pro}`. Inserts via the SSR Supabase client (anon role; the existing `waitlist_public_insert` RLS policy from prompt 2 already allows anon inserts). Unique-index violation (`23505`) on the `(email, platform)` index is collapsed to `{ ok: true, already: true }` so a re-submit doesn't surface a scary error.
+- `apps/web/app/XRWaitlist.tsx` — client component. Two-button platform picker (radio styled as glass tiles, accent ring on the active one), email input, submit. Status panel renders submitting / ok / error states under `aria-live="polite"` and clears on success. Plain `<form>` + `useState`, no extra deps.
+- `apps/web/app/page.tsx` — drops the old static panel, mounts `<XRWaitlist />` in its place. The "Coming next" eyebrow + headline move into the component so the page section just becomes a max-width wrapper.
+
+**Decisions / deviations:**
+
+- **Server route, anon client, not a direct browser-side insert.** A direct `supabase.from('waitlist').insert(...)` from the browser would have worked (RLS already allows anon insert), but a tiny server route centralizes validation, normalizes email case, and gives a single place to map the unique-violation code to friendly "already on the list" copy. The cost is one extra hop; the value is no `code === '23505'` magic numbers in component code.
+- **Unique violation = success, not error.** The `(email, platform)` unique index from prompt 2 is the right shape: re-submitting the same address shouldn't fail visibly. The route returns `already: true` so the UI can change the copy ("You're already on the list — we'll be in touch.") without claiming a new write happened.
+- **Email regex is the simple `^[^\s@]+@[^\s@]+\.[^\s@]+$`.** RFC 5321 is unreasonable to validate client-side; this catches typos (missing `@`, missing dot, leading/trailing whitespace) without rejecting valid uncommon addresses. Same regex client- and server-side so the two paths agree.
+- **Email lowercased on the server.** The unique index is case-sensitive — `foo@bar` and `FOO@BAR` would be two rows otherwise. Lowercasing in the route is the smallest fix; keeps the DB simple (no functional index needed).
+- **Honest copy.** "Native headset apps are in development — no ship date yet" — explicit, no promises. The mini-CLAUDE.md "deferred (XR builds)" line and design.md "framed honestly" both wanted this; the button just says "Join waitlist."
+- **No reCAPTCHA / honeypot yet.** The waitlist has zero abuse pressure today. Adding it now is the kind of speculation CLAUDE.md tells us to skip; if a bot ever floods it, a Turnstile widget is two lines.
+- **Same platforms as the DB enum.** The picker's two ids (`quest`, `vision_pro`) match `public.waitlist_platform`; the server validates against the same set so a forged payload can't sneak past the enum and get a 500 from Postgres.
+
+**Verified:**
+
+- `cd apps/web && bun run typecheck` → 0 errors.
+- `cd apps/web && bun run build` → compiles. `/` now 11.7 kB First Load 112 kB (+1.5 kB for the form + status panel). `/api/waitlist` registered as a dynamic-server route.
+- Dev-server probe against the live route:
+  - `POST {}` → 400 `expected JSON body`.
+  - `POST {email:"not-an-email", platform:"quest"}` → 400 `that doesn't look like a valid email`.
+  - `POST {email:"...", platform:"xbox"}` → 400 `platform must be 'quest' or 'vision_pro'`.
+  - `POST {email:"waitlist-probe+TS@…", platform:"quest"}` → 200 `{ok:true, already:false}`.
+  - Same payload again → 200 `{ok:true, already:true}`.
+  - Same email, `platform:"vision_pro"` → 200 `{ok:true, already:false}` (second platform on the same email is allowed by the composite unique index).
+- Service-role REST check confirmed both rows present in `public.waitlist` with the correct `(email, platform, created_at)`. Probe rows deleted afterwards.
+
+**Unfinished / broken:**
+
+- No Turnstile / hCaptcha — see decision above. If this goes public, it gets one.
+- No outbound confirmation email yet. We just persist; the "we'll email you" promise hangs on the future XR launch flow.
+- The form's no-JS path is a regular `<form>` POST but the route only accepts JSON — without JS, a submit would 400. Acceptable for a hero-CTA landing; could be widened to also accept `application/x-www-form-urlencoded` if no-JS support becomes a goal.
+
+**Next:** Prompt 12 — feel polish across the surfaces (per `prompt_flow.md`).
