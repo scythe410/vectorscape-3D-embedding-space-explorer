@@ -1,5 +1,12 @@
-export const ENGINE_VERSION = "0.0.0";
+export { VectorScape } from "./VectorScape";
+export type { VectorScapeProps } from "./VectorScape";
+export type {
+  ClusterCentroid,
+  PointsData,
+  RenderStats,
+  VectorScapeHandle,
+} from "./types";
+export { voxelDownsample } from "./voxel/voxelDownsample";
+export type { VoxelDownsampleResult } from "./voxel/voxelDownsample";
 
-export function hello(): string {
-  return "VectorScape engine online.";
-}
+export const ENGINE_VERSION = "0.0.0";

@@ -15,18 +15,28 @@
   },
   "files": ["dist"],
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "vite build && tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "dev": "vite",
+    "build": "vite build --mode lib && tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "build:demo": "vite build",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "@react-three/drei": ">=10",
+    "@react-three/fiber": ">=9",
+    "@react-three/postprocessing": ">=3",
     "react": ">=18",
     "three": ">=0.160"
   },
   "devDependencies": {
+    "@react-three/drei": "10.0.0",
+    "@react-three/fiber": "9.0.0",
+    "@react-three/postprocessing": "3.0.4",
     "@types/react": "19.0.0",
+    "@types/react-dom": "19.0.0",
     "@types/three": "0.170.0",
+    "postprocessing": "6.36.7",
     "react": "19.0.0",
+    "react-dom": "19.0.0",
     "three": "0.170.0",
     "typescript": "5.6.3",
     "vite": "5.4.10"
