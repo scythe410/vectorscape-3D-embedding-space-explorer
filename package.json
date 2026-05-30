@@ -1,0 +1,14 @@
+{
+  "name": "vectorscape",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "bun --filter web dev",
+    "build:engine": "bun --filter engine build"
+  },
+  "packageManager": "bun@1.3.14"
+}
