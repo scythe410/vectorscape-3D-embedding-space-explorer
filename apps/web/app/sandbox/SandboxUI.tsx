@@ -1,7 +1,19 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Papa from "papaparse";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// The viewer mounts an R3F <Canvas>, which requires `window`. ssr:false keeps
+// it out of the server bundle and avoids a hydration mismatch on first paint.
+const SandboxViewer = dynamic(() => import("./SandboxViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[78vh] items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/40 text-sm text-neutral-400">
+      Booting renderer…
+    </div>
+  ),
+});
 
 type Status = "pending" | "reducing" | "ready" | "error";
 
@@ -257,8 +269,26 @@ export default function SandboxUI() {
         </section>
       )}
 
-      {projectId && status && (
+      {projectId && status && status.status !== "ready" && (
         <StatusPanel status={status} onReset={resetAll} />
+      )}
+
+      {projectId && status?.status === "ready" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-emerald-200">
+              {status.point_count.toLocaleString()} points written.
+            </div>
+            <button
+              type="button"
+              onClick={resetAll}
+              className="text-xs text-neutral-400 underline hover:text-neutral-200"
+            >
+              Upload another CSV
+            </button>
+          </div>
+          <SandboxViewer projectId={projectId} />
+        </div>
       )}
     </div>
   );

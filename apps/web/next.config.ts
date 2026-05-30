@@ -26,6 +26,9 @@ loadRootEnv();
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // The engine workspace ships ESM-only via Vite. Next.js needs to transpile
+  // it so the App Router bundler doesn't choke on its imports.
+  transpilePackages: ["engine"],
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",

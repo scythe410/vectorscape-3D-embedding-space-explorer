@@ -11,6 +11,7 @@ import {
 import * as THREE from "three";
 
 import { FlyToTargets, type FlyToTargetsHandle } from "./scene/FlyToTargets";
+import { PointPicker } from "./scene/PointPicker";
 import { PointsCloud } from "./scene/PointsCloud";
 import type {
   ClusterCentroid,
@@ -35,6 +36,14 @@ export interface VectorScapeProps {
   minBrightness?: number;
   /** Fired when the user clicks an invisible centroid sphere. */
   onClusterSelect?: (id: ClusterCentroid["id"]) => void;
+  /**
+   * Fires with the index into `points.position` (full dataset, not the
+   * downsampled render subset) when the user clicks the canvas background
+   * within ~pixelRadius pixels of a point. -1 when no point is near enough.
+   */
+  onPointPick?: (index: number) => void;
+  /** Click radius in screen pixels for point picking. Default 16. */
+  pickPixelRadius?: number;
   /** Reports total/kept counts after the voxel pass. */
   onStats?: (stats: RenderStats) => void;
   className?: string;
@@ -68,12 +77,18 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       bloomIntensity = 1.2,
       minBrightness = 0.18,
       onClusterSelect,
+      onPointPick,
+      pickPixelRadius,
       onStats,
       className,
       style,
     },
     handleRef,
   ) {
+    // Bridge: Canvas onPointerMissed lives at the Canvas level, but the picker
+    // needs camera/gl from useThree (only available inside Canvas children).
+    // The ref is installed by <PointPicker> on mount.
+    const missedHandlerRef = useRef<(e: MouseEvent) => void>(() => {});
     // Voxel filter runs on data/budget change. Doing it during render is safe
     // because it's O(N) and synchronous; for very large datasets the host can
     // memoize `points` upstream.
@@ -108,6 +123,7 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
           onCreated={({ camera }) => {
             camera.layers.enable(BLOOM_LAYER);
           }}
+          onPointerMissed={(e) => missedHandlerRef.current(e as unknown as MouseEvent)}
         >
           <color attach="background" args={[background]} />
           <fogExp2 attach="fog" args={[fogColor.getHex(), fogDensity]} />
@@ -126,6 +142,15 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             onClusterSelect={onClusterSelect}
             handleRef={handleRef}
           />
+
+          {onPointPick && (
+            <PointPicker
+              data={points}
+              pixelRadius={pickPixelRadius}
+              onPick={onPointPick}
+              missedHandlerRef={missedHandlerRef}
+            />
+          )}
 
           <EffectComposer multisampling={0}>
             <Bloom

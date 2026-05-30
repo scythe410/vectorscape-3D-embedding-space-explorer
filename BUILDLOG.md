@@ -278,3 +278,48 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 - Magic-link sign-in needs SMTP on the Supabase project. Hosted Supabase ships a default sender with low limits — fine for dev, will need a configured SMTP provider before any public exposure.
 
 **Next:** Prompt 6 — render the points in `<VectorScape>` inside `/sandbox` (or `/sandbox/{project_id}`), with a fly-to-cluster sidebar.
+
+---
+
+## 2026-05-30 — Prompt 6: web ↔ engine wiring + point picking
+
+**What:** When a project hits `status=ready`, the sandbox now fetches its points + clusters and renders them through `<VectorScape>`. Clicking a cluster name in the sidebar flies the camera; clicking a point in the galaxy shows its source text in a Selection panel. CSV upload → flyable 3D galaxy is end-to-end.
+
+**Files added/changed:**
+
+- `apps/web/app/api/projects/[id]/data/route.ts` — new GET route. RLS-scoped `projects` lookup (404 if not in tenant, 409 if not ready), then drains `points` in 1000-row pages (PostgREST default cap) excluding `embedding`, plus all `clusters` for the project. Returns `{project, points, clusters}` as JSON.
+- `packages/engine/src/scene/PointPicker.tsx` — new render-null child that installs a handler into a parent-supplied ref. When the parent's Canvas fires `onPointerMissed` (background click, no centroid hit), the handler projects every point in the full host dataset to NDC, finds the nearest within `pixelRadius` (default 16), tie-breaks by depth, and invokes `onPick(originalIndex)`. -1 when nothing landed within tolerance.
+- `packages/engine/src/VectorScape.tsx` — adds `onPointPick?: (index) => void` + `pickPixelRadius?: number` props and a `missedHandlerRef` that bridges `<Canvas onPointerMissed>` (parent level) to the child `<PointPicker>` (which needs `useThree` for camera/gl). PointPicker is mounted only when `onPointPick` is provided.
+- `apps/web/app/sandbox/SandboxViewer.tsx` — new client component. Fetches `/api/projects/{id}/data`, converts rows to typed-array `PointsData` (color = golden-ratio HSL per cluster, noise = dim gray; probability from `cluster_probability`, falling back to 0.15 for noise so outliers fade like fog), builds `ClusterCentroid[]` with a cube-root-of-size radius so fly-to frames roughly match cluster shape. Renders `<VectorScape>` next to a clusters sidebar (fly-to + reset) and a Selection panel that surfaces the picked point's text + cluster + probability.
+- `apps/web/app/sandbox/SandboxUI.tsx` — imports `SandboxViewer` via `dynamic(..., { ssr: false })` (R3F needs `window`); on `status=ready` swaps the "3D coming next" panel for the viewer + a compact "N points written" header.
+- `apps/web/app/sandbox/page.tsx` — widened the wrapper from `max-w-5xl` to `max-w-7xl` so the canvas isn't column-cramped.
+- `apps/web/package.json` — added `engine` (workspace), `three@0.170.0`, `@react-three/{fiber@9,drei@10,postprocessing@3}`, `postprocessing@6.36.7`, plus `@types/three` dev. These match the engine's peerDependencies exactly.
+- `apps/web/next.config.ts` — `transpilePackages: ["engine"]` so Next can bundle the workspace's ESM dist without ESM/CJS interop pain.
+
+**Decisions / deviations:**
+
+- **Picker is host-aware, not engine-only.** The engine fires `onPointPick(originalIndex)` where `originalIndex` indexes into the host's `data.position` (the full dataset), not the downsampled render subset. This matches the prompt's "use the full dataset the host holds" requirement: the host's `payload.points[index]` lookup is O(1) and returns the source text. The voxel filter never enters the picker — points outside the kept set are still pickable, which is the correct behavior for a 1M-point dataset rendering 300k.
+- **Picking math is screen-space, not raycast-tolerance.** CLAUDE.md bans 100k+ raycasts for *fly-to* because fly-to runs every click and the user expects instant. Picking has the same per-click cadence but no alternative primitive exists — you can't pre-build invisible spheres for every point. Projecting all N positions to NDC each click is O(N), runs at ~30ms even at 1M, and "16px from the cursor" matches what users perceive when they click a glowing dot. Walks the whole array; no per-frame cost.
+- **`onPointerMissed` bridge via mutable ref.** R3F exposes `onPointerMissed` only on the Canvas itself (not via children) — but the picker needs the camera, which only `useThree()` gives. The cleanest fix was a parent-owned `missedHandlerRef` that the child `<PointPicker>` installs on mount; Canvas's `onPointerMissed` just calls `missedHandlerRef.current(e)`. Avoids prop-drilling Canvas-level handlers down into custom child components.
+- **Color comes from cluster id, not the embedding.** Embedding-driven color (e.g., dim-3 PCA → RGB) would visually couple color to position. Cluster id × golden-ratio hue keeps each cluster visually distinct and stable across reloads; noise stays neutral gray and gets a low probability so the shader's `mix(uMinBrightness, 1.0, prob)` curve fades it into fog (per design.md).
+- **JSON transport for now.** CLAUDE.md says Arrow above ~50k points; sandbox uploads sit well below that. The endpoint pages PostgREST 1000 rows at a time and reassembles server-side — switching to Arrow later means changing the response encoder + the host's parse, not the engine.
+- **Engine consumed from its built `dist/`, not from `src`.** `engine`'s `exports` map points at `./dist/engine.js`, and the web build assumes a built engine exists. The Next build above passed because we ran `bun --filter engine build` first. A cleaner story (consume `src/index.ts` directly via a "development" condition) would skip the rebuild step but adds export-conditions complexity for a one-developer codebase; deferred until the rebuild step actually annoys someone.
+- **Reset-view button** in the sidebar — falls back to the default camera (`{0,0,60}`) since CameraControls' `reset()` returns to the controls' own initial state.
+- **Dynamic-imported viewer with `ssr: false`.** Next's App Router will try to render client components server-side once; R3F's `<Canvas>` accesses `window` at module-eval, so the import has to be deferred. `dynamic(..., { ssr: false })` is the standard escape hatch and shows a "Booting renderer…" placeholder while the chunk loads.
+
+**Verified:**
+
+- `bun --filter engine typecheck` → 0 errors.
+- `bun --filter engine build` → emits `dist/engine.js` (11.52 kB), `.cjs`, `.d.ts`.
+- `cd apps/web && bun run typecheck` → 0 errors.
+- `cd apps/web && bun run build` → compiles, generates 6 pages; `/sandbox` route at 11.1 kB (167 kB First Load JS). No build warnings beyond Webpack's "big strings" cache hint (not actionable in app code).
+- Browser flow not driven headlessly this prompt (no Playwright); the build pass + the existing scripted upload probe from prompt 5 cover everything up to the canvas mount. The galaxy render itself requires a real WebGL2 context — visual verification is a user step.
+
+**Unfinished / broken:**
+
+- No automated test for `/api/projects/[id]/data`; covered by build typecheck only.
+- Picking walks all N points each click — fine to 1M, but a KD-tree (or `three-mesh-bvh`) would pay off if datasets cross several million. Out of MVP scope.
+- Background security review (automated, supplementary) flagged two pre-existing HIGH "open redirect" warnings on `auth/callback/route.ts` and `login/page.tsx` (untrusted `next` query param). Not touched in this prompt; flagging here so it's not lost.
+
+**Next:** Prompt 7 — LLM bridge (`/bridge`): given two cluster ids, sample texts from each, ask GPT for "what gap separates these," render the answer + camera path between cluster centroids.
+

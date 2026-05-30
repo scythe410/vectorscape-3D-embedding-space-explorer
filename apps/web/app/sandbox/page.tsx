@@ -29,7 +29,7 @@ export default async function SandboxPage() {
           </button>
         </form>
       </header>
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-7xl">
         <SandboxUI />
       </div>
     </main>

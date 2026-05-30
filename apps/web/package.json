@@ -10,18 +10,25 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@react-three/drei": "10.0.0",
+    "@react-three/fiber": "9.0.0",
+    "@react-three/postprocessing": "3.0.4",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
+    "engine": "workspace:*",
     "next": "15.0.3",
     "papaparse": "^5.5.3",
+    "postprocessing": "6.36.7",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "three": "0.170.0"
   },
   "devDependencies": {
     "@types/node": "22.9.0",
     "@types/papaparse": "^5.5.2",
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
+    "@types/three": "0.170.0",
     "autoprefixer": "10.4.20",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.15",
