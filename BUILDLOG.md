@@ -69,3 +69,22 @@ Append-only running memory of the VectorScape build. Read first, append always.
 **Unfinished / broken:** None. The auto-signup trigger relies on `auth.users` inserts going through Supabase Auth (the test bypasses it by inserting into `auth.users` directly inside the DO block).
 
 **Next:** Prompt 3 — reducer service: `/embed-reduce` endpoint with MiniLM → conditional PCA → PaCMAP → HDBSCAN and a CLI harness for standalone testing.
+
+---
+
+## 2026-05-30 — chore: drop local Docker stack (cloud-only)
+
+**What:** CLAUDE.md gained an explicit "Supabase — cloud only (no local Docker)" section. Removed leftover local-stack infra from the prompt-2 detour.
+
+**Removed:**
+
+- OrbStack cask via `brew uninstall --cask orbstack --zap` — also trashed `~/.orbstack`, `~/Library/Caches/dev.kdrag0n.MacVirt`, the Group Container, HTTPStorages, prefs, saved state, WebKit cache, and the `~/OrbStack` mount root.
+- `/opt/homebrew/bin/orb`, `/opt/homebrew/bin/orbctl` symlinks (unlinked by the cask).
+- `~/.docker` (docker CLI config; its `currentContext` was `orbstack`, created by the OrbStack install).
+- All supabase containers/images/volumes had already been pruned at the end of prompt 2; reconfirmed empty.
+
+**Kept:** supabase CLI (needed for `supabase db push` against the cloud project), bun, node, uv. `docker-credential-gcloud` and `pbmtomatrixorbital` in /opt/homebrew/bin are unrelated (gcloud SDK, netpbm).
+
+**Why:** CLAUDE.md now treats any local Supabase/Docker stack as a non-goal. Removing the runtime makes accidental `supabase start` impossible.
+
+**Next:** Prompt 3 (unchanged) — reducer service.

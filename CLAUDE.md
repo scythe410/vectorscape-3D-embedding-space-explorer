@@ -64,6 +64,13 @@ cd services/reducer && uv run pytest
 - **`packages/engine`: Bun all the way** — pure TS lib; Bun as bundler + test runner.
 - **`services/reducer`: untouched by this** — Python on `uv`. Bun is a JS tool with zero role here.
 
+## Supabase — cloud only (no local Docker)
+
+- **Develop against a hosted Supabase project. Do NOT run `supabase start` or any local Docker stack.** If a task seems to want the local stack, it's wrong — use the cloud project.
+- Use a **dedicated dev project**, separate from any future demo/prod project — tables get dropped and recreated constantly during the build, so don't point at data you care about.
+- Migrations still live in `supabase/migrations` (version-controlled). Apply them to the cloud with `supabase link --project-ref <ref>` then `supabase db push`. Never `supabase start`.
+- App env vars point at the cloud project (URL + anon + service keys) in `.env`; never commit them.
+
 ## Build log — read first, append always
 
 Maintain `BUILDLOG.md` at the repo root as the running memory of this build. **At the start of every task, read it first** to reconstruct what's already done, what decisions were made, and what's in progress — especially after a crash, context reset, or a new session. **At the end of every task, append an entry.** Never rewrite or delete past entries; only add.
