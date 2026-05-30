@@ -1,12 +1,15 @@
+import { tableFromArrays, tableToIPC } from "apache-arrow";
 import { NextResponse, type NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-// Page size for the points scan. Supabase's PostgREST caps a single response
-// at 1000 rows by default; we re-window with .range() until the project is
-// fully drained. Sandbox projects sit comfortably under 50k.
+// PostgREST caps a single response at 1000 rows by default; we paginate.
 const PAGE = 1000;
+
+// Above this row count, ship Arrow IPC instead of JSON. JSON.parse a few-MB
+// string on the main thread is the visible stall we're eliminating.
+const ARROW_THRESHOLD = 50_000;
 
 type PointRow = {
   id: string;
@@ -39,7 +42,7 @@ export async function GET(
     return NextResponse.json({ error: "not authenticated" }, { status: 401 });
   }
 
-  // RLS scopes the row to the user's tenant; missing → 404.
+  // RLS scopes to the user's tenant; missing → 404.
   const { data: project, error: projectErr } = await supabase
     .from("projects")
     .select("id, name, status, point_count")
@@ -58,24 +61,7 @@ export async function GET(
     );
   }
 
-  // Drain the points table in PAGE-sized windows. We exclude the embedding
-  // column — 384 floats × N points would be huge JSON for no rendering use.
-  const points: PointRow[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const to = from + PAGE - 1;
-    const { data, error } = await supabase
-      .from("points")
-      .select("id, text, x, y, z, cluster_id, cluster_probability")
-      .eq("project_id", id)
-      .order("id", { ascending: true })
-      .range(from, to);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    if (!data || data.length === 0) break;
-    points.push(...(data as PointRow[]));
-    if (data.length < PAGE) break;
-  }
+  const points = await drainPoints(supabase, id);
 
   const { data: clusters, error: clustersErr } = await supabase
     .from("clusters")
@@ -85,6 +71,12 @@ export async function GET(
   if (clustersErr) {
     return NextResponse.json({ error: clustersErr.message }, { status: 500 });
   }
+  const clusterRows = (clusters ?? []) as ClusterRow[];
+
+  const useArrow = points.length > ARROW_THRESHOLD;
+  if (useArrow) {
+    return arrowResponse(project, points, clusterRows);
+  }
 
   return NextResponse.json({
     project: {
@@ -93,6 +85,98 @@ export async function GET(
       point_count: project.point_count,
     },
     points,
-    clusters: (clusters ?? []) as ClusterRow[],
+    clusters: clusterRows,
+  });
+}
+
+async function drainPoints(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  projectId: string,
+): Promise<PointRow[]> {
+  const out: PointRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const to = from + PAGE - 1;
+    const { data, error } = await supabase
+      .from("points")
+      .select("id, text, x, y, z, cluster_id, cluster_probability")
+      .eq("project_id", projectId)
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+    out.push(...(data as PointRow[]));
+    if (data.length < PAGE) break;
+  }
+  return out;
+}
+
+/**
+ * Arrow bundle envelope (binary):
+ *   [4-byte LE uint32 metaLength][metaJSON utf8][Arrow IPC stream bytes]
+ *
+ * `meta` carries the project + cluster info (small enough to keep as JSON).
+ * The Arrow table holds only the per-point columns and travels as raw typed
+ * arrays — no JSON parse on the client hot path.
+ *
+ * Sentinels for nulls (Arrow's nullable vectors complicate the typed-array
+ * fast path; sentinels keep `Vector.toArray()` returning a flat Float32Array):
+ *   - cluster_id: int32, -1 means noise
+ *   - cluster_probability: float32, NaN means unknown
+ */
+function arrowResponse(
+  project: { id: string; name: string; point_count: number },
+  points: PointRow[],
+  clusters: ClusterRow[],
+): Response {
+  const n = points.length;
+  const x = new Float32Array(n);
+  const y = new Float32Array(n);
+  const z = new Float32Array(n);
+  const clusterId = new Int32Array(n);
+  const probability = new Float32Array(n);
+  const text = new Array<string>(n);
+
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    x[i] = p.x;
+    y[i] = p.y;
+    z[i] = p.z;
+    clusterId[i] = p.cluster_id ?? -1;
+    probability[i] = p.cluster_probability ?? Number.NaN;
+    text[i] = p.text;
+  }
+
+  const table = tableFromArrays({
+    x,
+    y,
+    z,
+    cluster_id: clusterId,
+    cluster_probability: probability,
+    text,
+  });
+  const arrowBytes = tableToIPC(table, "stream");
+
+  const metaJson = JSON.stringify({
+    project: {
+      id: project.id,
+      name: project.name,
+      point_count: project.point_count,
+    },
+    clusters,
+  });
+  const metaBytes = new TextEncoder().encode(metaJson);
+
+  const out = new Uint8Array(4 + metaBytes.byteLength + arrowBytes.byteLength);
+  new DataView(out.buffer).setUint32(0, metaBytes.byteLength, true);
+  out.set(metaBytes, 4);
+  out.set(arrowBytes, 4 + metaBytes.byteLength);
+
+  return new Response(out, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/octet-stream; format=vs-arrow-bundle",
+      "Content-Length": String(out.byteLength),
+      "Cache-Control": "no-store",
+    },
   });
 }

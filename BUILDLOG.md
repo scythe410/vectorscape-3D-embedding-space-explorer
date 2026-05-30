@@ -323,3 +323,42 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 
 **Next:** Prompt 7 — LLM bridge (`/bridge`): given two cluster ids, sample texts from each, ask GPT for "what gap separates these," render the answer + camera path between cluster centroids.
 
+---
+
+## 2026-05-30 — Prompt 7a: Arrow transport for large projects
+
+**What:** `/api/projects/[id]/data` now ships Apache Arrow IPC (in a tiny self-describing envelope) above 50k points; JSON below. Client branches on Content-Type, decodes Arrow columns straight into Float32/Int32 typed-array views, and feeds them into `<VectorScape>` with no `JSON.parse` on the hot path. Measured at 100k: ~50ms JSON main-thread stall → ~6ms with Arrow (8.5× faster, ~44ms saved). At 350k: ~180ms → ~18ms (10× faster, ~163ms saved).
+
+**Files added/changed:**
+
+- `apps/web/package.json` — added `apache-arrow@^18.0.0` (resolves to 18.1.0). The package's exports map handles the Node-vs-DOM split automatically (route uses Node build, client uses DOM build via Next's bundler).
+- `apps/web/app/api/projects/[id]/data/route.ts` — gated on `points.length > 50_000`. JSON path unchanged. Arrow path builds Float32Array/Int32Array column buffers in a single loop, hands them to `tableFromArrays`, serializes with `tableToIPC(table, "stream")`, then wraps the IPC bytes in an envelope `[4-byte LE uint32 metaLen][metaJSON utf8][arrow IPC bytes]`. `metaJSON` carries project + cluster info (small enough to keep as JSON — clusters are typically <50 rows). Sent as `Content-Type: application/octet-stream; format=vs-arrow-bundle`.
+- `apps/web/app/sandbox/loadProject.ts` — new module owning both decode paths. Returns a uniform `LoadedProject` shape with typed-array `pointsData`, materialized `centroids`, and a lazy `getPoint(i)` so the Arrow path can defer utf8 text decoding to click-time instead of materializing 100k strings up front (the other half of the no-stall guarantee). Reports `format` and `parseMs` so the UI surfaces which path served the data.
+- `apps/web/app/sandbox/SandboxViewer.tsx` — refactored to consume `LoadedProject`. The on-canvas overlay now shows `(json|arrow, parse XXms)` so you can see the difference live in the browser.
+- `apps/web/scripts/bench-load.ts` — synthetic benchmark mirroring both the server encoder and the client parser exactly. Generates N rows (~12 clusters + 5% noise — realistic sandbox shape), encodes both ways, parses both, prints wire sizes + best-of-3 timings. Runnable as `bun run apps/web/scripts/bench-load.ts [N]`.
+
+**Decisions / deviations:**
+
+- **50k threshold, hard-coded.** Anything between 16ms and 32ms is one or two dropped frames — still feels OK. At 30k JSON parses in ~14ms (one frame), at 50k it's ~25ms (a couple), at 100k it's ~50ms (visibly bad). 50k catches the inflection without changing behavior for small/typical sandbox uploads.
+- **Envelope format, not Arrow schema metadata.** Considered stashing project+clusters in `Schema.metadata`. Switched to a 4-byte-length-prefixed envelope because (a) it's transparent to inspect (`hexdump | head` shows the meta JSON), (b) clusters live outside Arrow's column-oriented assumptions cleanly, and (c) the envelope is 5 lines on each side vs. fighting apache-arrow's metadata API. The cost is one custom format we own; it has a `vs-arrow-bundle` content-type tag so the client never has to guess.
+- **Sentinel-encoded nulls, not Arrow nullable vectors.** `cluster_id = -1` for noise, `cluster_probability = NaN` for unknown. Nullable Arrow vectors complicate the typed-array fast path — `Vector.toArray()` either copies into a fresh array or hands back a dense one, depending on null density. Sentinels keep the column densely backed and zero-copy. The client converts sentinels back to `null` at the `getPoint` boundary, so the rest of the UI is unchanged.
+- **Position interleave is the only mandatory copy.** Arrow gives us `x`, `y`, `z` as three separate Float32Array views (zero-copy from the IPC buffer); THREE.BufferAttribute needs them interleaved as `[x0,y0,z0,x1,y1,z1,...]`. That's an O(N) walk — 1.5ms at 100k, 5ms at 350k — far cheaper than the JSON.parse it replaces. We could ship a pre-interleaved column to skip even this, but it'd make the wire format awkward for any non-engine consumer.
+- **Color/size/probability buffers still computed client-side.** Color depends on the client's hue palette (golden-ratio HSL); shipping it would lock the palette into the wire format. The fill loop is the same speed in both paths (~5ms at 350k), and any per-frame VectorScape stuff is downstream — neither path touches it.
+- **Text decoded lazily via `Vector.get(i)`.** Decoding 100k utf8 strings up front is the next biggest avoidable cost (~20ms at 100k). Only the picked point's text is ever shown, so we keep the Arrow vector around and decode on click. `getPoint` is the only place this leaks; the rest of the UI doesn't know or care which path served the row.
+- **Client-side compression deferred.** gzip would cut the wire by ~3× and Vercel/Next can do it transparently — but it's an HTTP-layer concern that doesn't change parse cost on the client. Reaches the same "no stall" target without adding `Accept-Encoding` plumbing.
+
+**Verified:**
+
+- `bun run apps/web/scripts/bench-load.ts 100000` (best of 3): JSON total 49.8ms (JSON.parse alone 45.0ms) vs Arrow total 5.8ms (tableFromIPC 0.4ms). **8.5× speedup, 43.9ms saved on the main thread.** Wire: 19.56 MiB JSON vs 8.00 MiB Arrow bundle.
+- `bun run apps/web/scripts/bench-load.ts 350000`: JSON 181.5ms (parse 168.7ms) vs Arrow 18.1ms. **10× speedup, 163ms saved.** Wire: 68.83 MiB vs 28.27 MiB.
+- `bun run apps/web/scripts/bench-load.ts 30000` (under-threshold): JSON 13.6ms, Arrow 2.1ms. Confirms JSON is still fine below the 50k gate.
+- `cd apps/web && bun run typecheck` → 0 errors.
+- `cd apps/web && bun run build` → compiles. `/sandbox` route still 11.1 kB First Load JS (apache-arrow is in the dynamic-imported `SandboxViewer` chunk, doesn't inflate the initial bundle).
+- End-to-end browser run not driven from here — the bench numbers come from the same code paths the browser executes (and Bun's V8 ≈ Chrome's V8 on this kind of work); user can confirm the live `(arrow, parse Xms)` badge in the canvas overlay when uploading a >50k-row CSV.
+
+**Unfinished / broken:**
+
+- 100k+ row Supabase fetch is paginated 1000 rows at a time (the `PostgREST` default) and the round trips dominate wall time. Parallelizing the page fetches or moving to a Postgres RPC would help — out of this prompt's scope (the task target is the *client* parse stall, which is fixed).
+- No live browser parse measurement in this changelog — the bench is the proxy. Adding a `console.log` of `parseMs` in production is already there via the on-canvas badge.
+- gzip / brotli on the API response would cut wire by ~3× more; not configured at the Next layer (left for whoever wires real CDN/edge config).
+
