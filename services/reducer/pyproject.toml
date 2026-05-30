@@ -18,6 +18,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "typer>=0.12",
     "openai>=1.40",
+    "arq>=0.26",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ dev = [
 [project.scripts]
 dev = "app.dev:main"
 reducer-cli = "app.cli:main"
+worker = "app.worker:main"
 
 [build-system]
 requires = ["hatchling"]

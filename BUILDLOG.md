@@ -178,3 +178,47 @@ Append-only running memory of the VectorScape build. Read first, append always.
 - No reducer-side integration test against the DB (would require live cloud credentials in CI). The CLI run is the integration smoke for now.
 
 **Next:** Prompt 5 — wire the web app to the reducer (upload UI → POST /embed-reduce → poll status → render in `<VectorScape>`).
+
+---
+
+## 2026-05-30 — Prompt 5a: arq worker + status endpoint
+
+**What:** Routed `/embed-reduce` requests above 10k rows to an arq + Redis background worker; added `GET /status/{project_id}` so callers can poll progress and failure messages. Errors surface as `status=error` with a populated `error_message`, not swallowed 500s with mystery `pending` rows.
+
+**Files added/changed:**
+
+- `supabase/migrations/20260530130000_projects_error_message.sql` — adds `projects.error_message text` so failures have a place to land. Applied to the cloud project via `supabase db push`.
+- `services/reducer/pyproject.toml` — added `arq>=0.26`, `redis>=5.0`. New console script `worker = "app.worker:main"` so `uv run worker` boots the arq worker.
+- `app/config.py` — added `REDIS_URL` (defaults to `redis://localhost:6379/0`) and `ASYNC_ROW_THRESHOLD` (default 10000, CLAUDE.md-aligned, overridable via `REDUCER_ASYNC_THRESHOLD`).
+- `app/progress.py` — small Redis-async helper. `set_progress`/`get_progress`/`clear_progress` write a `vectorscape:progress:{project_id}` hash holding `stage` + `pct`, with a 24h TTL. Status of record is still Postgres; this is just the live side-channel.
+- `app/worker.py` — `WorkerSettings` (single function, `max_jobs=1`, 30-min timeout) plus `embed_reduce_job(ctx, project_id, tenant_id, texts, embed_model, reducer)`. Sets status→reducing, runs the pipeline, writes results, sets status→ready. Exceptions are caught, formatted as `"TypeName: message"`, written to `projects.error_message` with `status=error` in a fresh connection, then re-raised so arq logs the failure too.
+- `app/db.py` — `set_status` gained `error_message: str | None = None`. On `status='error'` it writes both columns; on any other transition it clears `error_message` so retries don't carry stale failure text. New `fetch_status(conn, project_id)` returns `{status, point_count, error_message}` or `None`.
+- `app/api.py` — `/embed-reduce` is now async. After `ensure_project` it always resets status to `pending` so a retry after error/ready starts clean. If `len(texts) > ASYNC_ROW_THRESHOLD`, opens an arq `create_pool`, enqueues `embed_reduce_job`, and returns `mode="queued"` immediately; otherwise runs inline and returns `mode="sync"`. New `GET /status/{project_id}` returns DB status + point_count + error_message, and pulls live progress from Redis only while status is in `{pending, reducing}`.
+- `services/reducer/samples/make_large.py`, `samples/large.csv` — 10,500-row CSV built from 15 seed texts so the embedding cache makes reruns cheap; just enough to clear the 10k threshold.
+
+**Decisions / deviations:**
+
+- **Progress lives in Redis, not Postgres.** A `projects.progress` column would either bloat the row with frequent updates or need a separate audit table. The status of record (pending/reducing/ready/error + message) is the durable signal in Postgres; the per-stage percentage is transient and fits Redis naturally since the worker already speaks Redis. The status endpoint stops polling Redis once the project is terminal.
+- **`max_jobs=1` per worker.** The pipeline loads sentence-transformers + PaCMAP + HDBSCAN — memory- and CPU-heavy. Running two in one process invites GIL contention and OOMs. Horizontal scale = more worker processes, not more concurrency per process.
+- **Sync error path needed an explicit second connection.** First implementation kept `set_status(error)` inside the same `with connect()` block as the work — but psycopg's context manager rolls back on exception, undoing the error-status write and leaving the row at `pending`. Fixed by writing the error status from a fresh `with connect()` after the work-tx has rolled back, before re-raising the HTTPException. Worker path was already correct (each `with connect()` block is its own short-lived transaction).
+- **Bogus reducer name is the chosen "broken input" probe.** Tried bogus `embed_model` first; doesn't fail because `embeddings.py` hardcodes the local model and ignores the name unless it's literally `"openai"`. Picking a reducer the pipeline doesn't know about (`run_pipeline` validates the set explicitly) gives a clean, deterministic failure that exercises both error paths.
+- **Status reset to `pending` on every POST.** Without it, a project that previously hit `error` would keep its old `error_message` visible during the next run until either set_status cleared it or the run finished — the explicit reset makes the state machine clearer.
+- **Redis installed locally for dev** (`brew install redis`, then `redis-server --daemonize yes`). Production swaps `REDIS_URL` for a managed instance; no code change.
+
+**Verified:**
+
+- `uv sync --extra dev` → arq 0.28.0, redis 5.3.1, hiredis 3.3.1 added.
+- `uv run ruff check app reducer samples` → All checks passed.
+- `uv run pytest -q` → 1 passed.
+- Cloud-DB sync probe: POST `samples/sample.csv` (60 rows) → response `mode="sync"`, `n_points=60`, then GET `/status/<pid>` → `status="ready"`, `point_count=60`, `error_message=null`.
+- Cloud-DB async probe: POST `samples/large.csv` (10,500 rows) → response `mode="queued"` in 4.5s. Polling /status observed transitions `pending(stage=embedding,5%) → reducing(stage=reducing,20%) → reducing(stage=writing,85%) → ready(point_count=10500, progress=null)`. Total wall time ~35s with the embedding cache warm.
+- Cloud-DB error probe (sync): POST 30 rows with `reducer="definitely-not-a-reducer"` → HTTP 500 with `detail="ValueError: unknown reducer: ..."`; /status returns `status="error"`, `error_message="ValueError: unknown reducer: definitely-not-a-reducer"`.
+- Cloud-DB error probe (async): same payload with 10,500 rows → enqueue succeeds (`mode="queued"`); worker raises; /status terminates at `status="error"` with the same error_message. Worker logs the exception, doesn't crash, picks up the next job.
+- Test projects deleted from cloud after verification.
+
+**Unfinished / broken:**
+
+- No automated integration test covers the worker path; verification was the cloud probes above. A test using `arq.testing.MockWorker` or a fakeredis-backed run would be cheap to add later.
+- `app/embeddings.py` still ignores unknown `embed_model` strings (uses the local default unless the value is literally `"openai"`). Not in this prompt's scope; flagging because the discovery surfaced during error-path testing.
+
+**Next:** Prompt 5 — wire the web app to the reducer (upload UI → POST /embed-reduce → poll /status → render in `<VectorScape>`).

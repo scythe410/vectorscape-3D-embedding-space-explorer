@@ -61,11 +61,52 @@ def ensure_project(
     return pid, tid
 
 
-def set_status(conn: psycopg.Connection, project_id: str, status: str) -> None:
-    conn.execute(
-        "update public.projects set status = %s::public.project_status where id = %s",
-        (status, project_id),
-    )
+def set_status(
+    conn: psycopg.Connection,
+    project_id: str,
+    status: str,
+    *,
+    error_message: str | None = None,
+) -> None:
+    """Flip a project's status. On 'error', also record error_message.
+
+    Non-error transitions clear any prior error_message so retries don't
+    leave a stale failure reason hanging around.
+    """
+    if status == "error":
+        conn.execute(
+            """
+            update public.projects
+            set status = 'error'::public.project_status,
+                error_message = %s
+            where id = %s
+            """,
+            (error_message, project_id),
+        )
+    else:
+        conn.execute(
+            """
+            update public.projects
+            set status = %s::public.project_status,
+                error_message = null
+            where id = %s
+            """,
+            (status, project_id),
+        )
+
+
+def fetch_status(conn: psycopg.Connection, project_id: str) -> dict | None:
+    row = conn.execute(
+        """
+        select status::text, point_count, error_message
+        from public.projects
+        where id = %s
+        """,
+        (project_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return {"status": row[0], "point_count": int(row[1]), "error_message": row[2]}
 
 
 def _delete_existing(conn: psycopg.Connection, project_id: str) -> None:

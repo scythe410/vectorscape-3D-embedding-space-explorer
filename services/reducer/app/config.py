@@ -12,6 +12,11 @@ load_dotenv(Path.cwd() / ".env", override=False)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+# Row count above which /embed-reduce hands off to the arq worker instead
+# of running inline. CLAUDE.md sets this threshold at 10k.
+ASYNC_ROW_THRESHOLD = int(os.environ.get("REDUCER_ASYNC_THRESHOLD", "10000"))
 
 CACHE_DIR = Path(
     os.environ.get("REDUCER_CACHE_DIR", str(Path.home() / ".cache" / "vectorscape" / "embeddings"))
