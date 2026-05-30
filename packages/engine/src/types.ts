@@ -23,10 +23,32 @@ export interface ClusterCentroid {
   label?: string;
 }
 
+/** One stop on a cinematic flythrough path. */
+export interface FlythroughKeyframe {
+  /** Camera position in world space. */
+  position: [number, number, number];
+  /** Look-at target in world space. */
+  target: [number, number, number];
+  /** Override for CameraControls smoothTime during this transition (seconds). */
+  smoothTime?: number;
+  /** Extra time to hold at this pose after the transition lands (ms). */
+  holdMs?: number;
+}
+
 /** Imperative handle the host can ref to drive the camera. */
 export interface VectorScapeHandle {
   flyTo: (clusterId: ClusterCentroid["id"]) => void;
   resetView: () => void;
+  /** Snap (or smoothly transition) to an explicit camera + target pose. */
+  setLookAt: (
+    position: [number, number, number],
+    target: [number, number, number],
+    enableTransition?: boolean,
+  ) => Promise<void>;
+  /** Play a sequenced cinematic path. Resolves when finished or cancelled. */
+  playFlythrough: (keyframes: FlythroughKeyframe[]) => Promise<void>;
+  /** Cancel an in-flight flythrough so the user can take over. */
+  cancelFlythrough: () => void;
 }
 
 /** Total point count and the kept count after voxel downsampling. */

@@ -2,6 +2,7 @@ export { VectorScape } from "./VectorScape";
 export type { VectorScapeProps } from "./VectorScape";
 export type {
   ClusterCentroid,
+  FlythroughKeyframe,
   PointsData,
   RenderStats,
   VectorScapeHandle,

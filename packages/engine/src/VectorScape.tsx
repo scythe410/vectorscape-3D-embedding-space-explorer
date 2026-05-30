@@ -184,11 +184,16 @@ function SceneController({
   const controlsRef = useRef<CameraControls>(null);
   const targetsRef = useRef<FlyToTargetsHandle>(null);
   const { camera } = useThree();
+  // Monotonic counter — every cancel/new play bumps it; in-flight loops bail
+  // when they see a stale id. Cleaner than threading AbortControllers through
+  // a Promise chain.
+  const flythroughGenRef = useRef(0);
 
   useImperativeHandle(
     handleRef,
     () => ({
       flyTo: (id) => {
+        flythroughGenRef.current++;
         const mesh = targetsRef.current?.getMesh(id);
         const controls = controlsRef.current;
         if (!mesh || !controls) return;
@@ -197,8 +202,52 @@ function SceneController({
         void controls.fitToSphere(mesh, true);
       },
       resetView: () => {
+        flythroughGenRef.current++;
         controlsRef.current?.reset(true);
         camera.position.set(0, 0, 60);
+      },
+      setLookAt: async (position, target, enableTransition = true) => {
+        const controls = controlsRef.current;
+        if (!controls) return;
+        await controls.setLookAt(
+          position[0],
+          position[1],
+          position[2],
+          target[0],
+          target[1],
+          target[2],
+          enableTransition,
+        );
+      },
+      playFlythrough: async (keyframes) => {
+        const controls = controlsRef.current;
+        if (!controls || keyframes.length === 0) return;
+        const myGen = ++flythroughGenRef.current;
+        const defaultSmooth = controls.smoothTime;
+        try {
+          for (const kf of keyframes) {
+            if (flythroughGenRef.current !== myGen) return;
+            if (kf.smoothTime != null) controls.smoothTime = kf.smoothTime;
+            await controls.setLookAt(
+              kf.position[0],
+              kf.position[1],
+              kf.position[2],
+              kf.target[0],
+              kf.target[1],
+              kf.target[2],
+              true,
+            );
+            if (flythroughGenRef.current !== myGen) return;
+            if (kf.holdMs && kf.holdMs > 0) {
+              await new Promise((r) => setTimeout(r, kf.holdMs));
+            }
+          }
+        } finally {
+          controls.smoothTime = defaultSmooth;
+        }
+      },
+      cancelFlythrough: () => {
+        flythroughGenRef.current++;
       },
     }),
     [camera],

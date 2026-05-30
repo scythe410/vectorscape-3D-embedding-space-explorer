@@ -214,7 +214,19 @@ function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
 }
 
 export async function loadProject(projectId: string): Promise<LoadedProject> {
-  const r = await fetch(`/api/projects/${projectId}/data`, { cache: "no-store" });
+  return loadFromUrl(`/api/projects/${projectId}/data`, { cache: "no-store" });
+}
+
+/** Load a pre-baked galaxy from a static asset URL (no auth, no DB). */
+export async function loadProjectFromUrl(
+  url: string,
+  init?: RequestInit,
+): Promise<LoadedProject> {
+  return loadFromUrl(url, init);
+}
+
+async function loadFromUrl(url: string, init?: RequestInit): Promise<LoadedProject> {
+  const r = await fetch(url, init);
   if (!r.ok) {
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     throw new Error(body.error || `HTTP ${r.status}`);

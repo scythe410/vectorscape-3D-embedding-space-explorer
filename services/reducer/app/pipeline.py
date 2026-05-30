@@ -70,16 +70,26 @@ def _reduce_to_3d(x: np.ndarray, reducer: str) -> np.ndarray:
     return m.fit_transform(x, init="pca").astype(np.float32)
 
 
-def _cluster(coords: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _cluster(
+    coords: np.ndarray,
+    min_cluster_size: int | None = None,
+    selection_method: str = "eom",
+) -> tuple[np.ndarray, np.ndarray]:
     """Return (cluster_ids, probabilities). Noise points get id=-1."""
     n = coords.shape[0]
     if n < 5:
         return np.full(n, -1, dtype=np.int32), np.zeros(n, dtype=np.float32)
     import hdbscan  # type: ignore
 
-    # min_cluster_size scales gently with n; floor of 5 keeps small CSVs useful.
-    mcs = max(5, int(round(np.sqrt(n) / 2)))
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=mcs, prediction_data=False)
+    # Default scales gently with n; floor of 5 keeps small CSVs useful. The
+    # heuristic over-merges on corpora with many small genuine clusters
+    # (e.g. 20 newsgroups), so the host can override.
+    mcs = min_cluster_size if min_cluster_size else max(5, int(round(np.sqrt(n) / 2)))
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=mcs,
+        cluster_selection_method=selection_method,
+        prediction_data=False,
+    )
     labels = clusterer.fit_predict(coords)
     probs = clusterer.probabilities_
     return labels.astype(np.int32), probs.astype(np.float32)
@@ -127,6 +137,8 @@ def run_pipeline(
     texts: list[str],
     embed_model: str = DEFAULT_EMBED_MODEL,
     reducer: str = DEFAULT_REDUCER,
+    min_cluster_size: int | None = None,
+    cluster_selection_method: str = "eom",
 ) -> PipelineResult:
     if not texts:
         raise ValueError("texts is empty")
@@ -138,7 +150,11 @@ def run_pipeline(
     reduced_in, used_pca = _maybe_pca(embeddings)
     coords_raw = _reduce_to_3d(reduced_in, reducer)
     coords = _normalize_coords(coords_raw)
-    cluster_ids, probs = _cluster(coords)
+    cluster_ids, probs = _cluster(
+        coords,
+        min_cluster_size=min_cluster_size,
+        selection_method=cluster_selection_method,
+    )
     clusters = _build_cluster_rows(coords, cluster_ids, texts)
 
     return PipelineResult(

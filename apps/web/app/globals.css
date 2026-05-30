@@ -2,8 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg-deep: #05060a;
+  --bg-elevated: #0a0c12;
+}
+
 html,
 body {
-  background: #06070b;
+  background: var(--bg-deep);
   color: #e8ecf2;
+  font-feature-settings: "ss01", "ss02";
+}
+
+/* Faint cool gradient over deep black per design.md §1, plus a subtle vignette
+   toward the edges so the eye reads the page as a luminous body, not a flat
+   plane. Layered on the body so individual routes don't need to repaint. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(80, 110, 200, 0.06), transparent 55%),
+    radial-gradient(ellipse at 50% 110%, rgba(180, 120, 60, 0.045), transparent 60%);
 }
