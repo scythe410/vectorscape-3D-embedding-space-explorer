@@ -418,3 +418,51 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 - The "Coming to Quest & Vision Pro" panel is decorative; the waitlist DB table exists from prompt 2 but no form wires to it yet. That's prompt 11 in `prompt_flow.md`.
 
 **Next:** Prompt 10 — the Bridge: cluster multi-select in the engine, `POST /bridge`, LLM explanation panel with cited example points. (Prompt 9 was the SKM lens / landing — this prompt.)
+
+---
+
+## 2026-05-31 — Prompt 10: Bridge — multi-select, /bridge, explanation panel
+
+**What:** Shipped the Bridge end-to-end. Shift-click two cluster markers in the engine → the web app posts to a new reducer route that retrieves each cluster's medoid and its boundary points (the points in cluster A whose embedding is closest to cluster B's medoid via pgvector cosine, and vice versa), feeds medoids + boundary texts to the LLM, and returns prose plus cited example points. The UI renders the explanation in a side panel; clicking any cited example flies the camera to that point.
+
+**Files added/changed:**
+
+- `services/reducer/app/bridge.py` — new module + `POST /bridge`. Pydantic models `BridgeRequest` / `BridgeResponse` / `BridgeExample` / `BridgeClusterMeta`. Helpers: `_fetch_cluster` (joins `clusters` ↔ medoid `points` row to get id/text/embedding/cx,cy,cz/size), `_fetch_boundary` (uses pgvector `embedding <=> %s` cosine-distance order, limit 4, filters out null embeddings), `_build_prompt` (system+user prompt that names the shared theme then the contrast and tells the LLM to lean on the boundary points), `_summarize` (OpenAI `gpt-4o-mini` at temp 0.4 / 320 max tokens; explicit fallback string when `OPENAI_API_KEY` is unset so the panel still renders structurally), `_to_examples` (always cites the medoid first, then boundary points, dedupes the medoid out of the boundary set, role-tagged for the UI).
+- `services/reducer/app/main.py` — mounts the bridge router alongside the existing embed router.
+- `packages/engine/src/types.ts` — new `ClusterPickOptions { additive }`; `VectorScapeHandle` gains `flyToPoint(position, radius?)`. `onClusterSelect` now passes `(id, opts)` so hosts can implement multi-select.
+- `packages/engine/src/scene/FlyToTargets.tsx` — click handler reads `e.nativeEvent.shiftKey | metaKey | ctrlKey` and forwards as `opts.additive`.
+- `packages/engine/src/VectorScape.tsx` — typed signature change for `onClusterSelect`; `flyToPoint` implementation builds an ephemeral `THREE.Sphere` and calls `CameraControls.fitToSphere(sphere, true)` so cited-point flights reuse the same approach motion as cluster flights (no new camera code path).
+- `packages/engine/src/index.ts` — re-exports `ClusterPickOptions`.
+- `apps/web/app/api/projects/[id]/bridge/route.ts` — new Next route. Auth check via Supabase server client, RLS-scoped `projects` lookup (404 outside tenant, 409 if not `ready`), validates `cluster_a` / `cluster_b` as distinct integers, then POSTs to `REDUCER_URL/bridge` and returns the response body verbatim. No service-role calls from this layer.
+- `apps/web/app/sandbox/BridgePanel.tsx` — new client component. Owns the bridge fetch lifecycle with a monotonic request counter (so a stale response from the previous pair can't clobber the current one); auto-fires when `selection.length === 2`; renders chips for the selected pair, the LLM prose, a `cited · <model>` footer (so `model: 'fallback'` is honest when no key is configured), and the two cited columns. Each cited row is a button that calls `handleRef.current?.flyToPoint([x,y,z], 2.5)`. Boundary points are tagged in amber, medoids in neutral, so the user can tell which examples carry the contrast signal.
+- `apps/web/app/sandbox/SandboxViewer.tsx` — selection state `number[]` (cap 2). New `onClusterPick` callback: plain click flies + replaces selection with `[id]`; modifier-click toggles the id in the selection (oldest drops out when at cap). Cluster sidebar buttons also honor shift/meta/ctrl so the same multi-select gesture works from the list. Selected rows tint amber. Bridge panel slots between the cluster list and the existing point-selection panel.
+
+**Decisions / deviations:**
+
+- **Boundary = K-nearest-by-cosine to the other cluster's medoid (K=4), not "convex-hull-edge points" or a centroid-distance ranking inside the cluster.** Each cluster's medoid embedding is the cheapest single anchor for "the *other* concept"; sorting cluster A's members by `embedding <=> B.medoid` (pgvector cosine distance) is the natural "items in A that lean toward B" definition. Pure 3D coord distance after PaCMAP/UMAP would discard the high-dim signal that made the embedding useful in the first place — the boundary should live in the embedding space, not the projected one. K=4 gives the LLM enough texture without burning context; the wire payload is small and the panel stays readable.
+- **Multi-select gesture = modifier-click.** Right-click would conflict with browser context menus; a sticky "multi-select mode" toggle in the toolbar is one more thing to discover. Shift/cmd/ctrl-click is the file-manager convention and works identically on the cluster markers and the sidebar list. Plain click stays the "fly to" verb so the existing single-cluster motion is untouched. The hint string in the canvas overlay says so explicitly.
+- **OpenAI fallback returns a plain explanatory string, not 503.** A configured-but-broken OpenAI key still returns 502 from the reducer (FastAPI bubbles the exception), but a *missing* key returns a friendly summary and `model: 'fallback'` so the cited-points list still renders. The Bridge UX is half the experience even without the prose; making the panel silently empty when the key isn't set would hide that.
+- **No new camera primitive for cited-point fly-to.** Reusing `CameraControls.fitToSphere` with an ephemeral `THREE.Sphere(point, radius)` means the cited-point motion has the same damping curve as cluster flights — visually consistent and one fewer code path to tune in Prompt 12.
+- **`onClusterSelect` signature widened, not split.** A separate `onClusterMultiSelect` would mean two callbacks racing for the same click. One callback with `(id, opts)` lets the host decide locally; existing single-arg callers (the lens viewer) keep working because TS allows assignment of a `(id) => void` to `(id, opts) => void`.
+- **Stale-response guard on the bridge fetch.** Auto-fetching as soon as a pair forms means a fast switch from `[A, B]` → `[A, C]` would race two in-flight requests. The monotonic `reqIdRef` discards any response whose id isn't current — same pattern the flythrough generation counter uses.
+- **No bridge UI in the lens.** The pre-baked SKM galaxy is a static asset, not a DB-resident project, so `embedding <=> %s` has nowhere to run. Wiring a parallel cosine search over the bundled JSON would need every point's full 384-dim embedding in the asset — that 4.6 MiB demo would balloon past 50 MiB. Bridge lives in the sandbox where the DB is the source of truth; the lens stays a no-input flythrough.
+
+**Verified:**
+
+- `bun --filter engine build` → 0 errors; engine dist 12.91 kB (+0.35 kB for `flyToPoint` + the modifier-key wiring).
+- `bun --filter engine typecheck` → 0 errors.
+- `cd apps/web && bun run typecheck` → 0 errors.
+- `cd apps/web && bun run build` → compiles. New route `/api/projects/[id]/bridge` listed as dynamic-server. Sandbox first-load 111 kB (+0.5 kB for the panel).
+- `cd services/reducer && uv run ruff check app/bridge.py app/main.py` → all checks passed.
+- `cd services/reducer && uv run pytest -q` → 1 passed.
+- Reducer FastAPI app loads with `/bridge` registered as POST alongside the existing routes.
+- End-to-end "select two clusters → LLM explanation → click cited point → camera flies" is a manual browser step against a live reducer + Supabase; no headless harness for that path yet (same gap as the lens cinematic).
+
+**Unfinished / broken:**
+
+- No automated test against a real Postgres + pgvector instance for `/bridge`. The cosine-distance ordering is the trust-but-verify part; the live sandbox project is the proving ground.
+- `_summarize` makes a blocking OpenAI call from a sync FastAPI handler. Fine at one request at a time; under load it would block the event loop. The whole reducer is single-tenant-dev today so this is parked.
+- Bridge has no caching layer — the same `(project_id, cluster_a, cluster_b)` triple re-asks the LLM on every panel mount. A trivial in-memory or Redis cache could land in Prompt 12.
+- The cited-point fly-to uses a fixed `radius=2.5` framing. Looks right at the engine's default `COORD_SCALE=60`; at very different scales it would over-zoom or under-zoom. Acceptable since the reducer always normalizes to scale 60.
+
+**Next:** Prompt 11 — XR waitlist section + email capture into `waitlist`; honest "coming soon" framing for Quest + Vision Pro.

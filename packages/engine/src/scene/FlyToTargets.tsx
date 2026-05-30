@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
 
-import type { ClusterCentroid } from "../types";
+import type { ClusterCentroid, ClusterPickOptions } from "../types";
 
 export interface FlyToTargetsHandle {
   getMesh: (id: ClusterCentroid["id"]) => THREE.Mesh | null;
@@ -9,7 +9,7 @@ export interface FlyToTargetsHandle {
 
 interface Props {
   clusters: ClusterCentroid[];
-  onPick?: (id: ClusterCentroid["id"]) => void;
+  onPick?: (id: ClusterCentroid["id"], opts: ClusterPickOptions) => void;
 }
 
 /**
@@ -49,7 +49,16 @@ export const FlyToTargets = forwardRef<FlyToTargetsHandle, Props>(function FlyTo
             position={[c.cx, c.cy, c.cz]}
             scale={[r, r, r]}
             visible={false}
-            onClick={onPick ? (e) => { e.stopPropagation(); onPick(c.id); } : undefined}
+            onClick={
+              onPick
+                ? (e) => {
+                    e.stopPropagation();
+                    const native = e.nativeEvent as MouseEvent;
+                    const additive = native.shiftKey || native.metaKey || native.ctrlKey;
+                    onPick(c.id, { additive });
+                  }
+                : undefined
+            }
           >
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>

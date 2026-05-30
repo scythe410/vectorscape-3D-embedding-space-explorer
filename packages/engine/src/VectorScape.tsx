@@ -15,6 +15,7 @@ import { PointPicker } from "./scene/PointPicker";
 import { PointsCloud } from "./scene/PointsCloud";
 import type {
   ClusterCentroid,
+  ClusterPickOptions,
   PointsData,
   RenderStats,
   VectorScapeHandle,
@@ -34,8 +35,12 @@ export interface VectorScapeProps {
   bloomIntensity?: number;
   /** Floor on the probability brightness curve. 0 fully kills outliers. */
   minBrightness?: number;
-  /** Fired when the user clicks an invisible centroid sphere. */
-  onClusterSelect?: (id: ClusterCentroid["id"]) => void;
+  /**
+   * Fired when the user clicks an invisible centroid sphere. The second
+   * argument exposes shift/cmd/ctrl modifier state so the host can implement
+   * additive multi-selection (Bridge uses this to pick a second cluster).
+   */
+  onClusterSelect?: (id: ClusterCentroid["id"], opts: ClusterPickOptions) => void;
   /**
    * Fires with the index into `points.position` (full dataset, not the
    * downsampled render subset) when the user clicks the canvas background
@@ -178,7 +183,7 @@ function SceneController({
   handleRef,
 }: {
   clusters: ClusterCentroid[];
-  onClusterSelect?: (id: ClusterCentroid["id"]) => void;
+  onClusterSelect?: (id: ClusterCentroid["id"], opts: ClusterPickOptions) => void;
   handleRef: React.ForwardedRef<VectorScapeHandle>;
 }) {
   const controlsRef = useRef<CameraControls>(null);
@@ -200,6 +205,18 @@ function SceneController({
         // fitToSphere frames the sphere with margin; the boolean enables the
         // smooth transition CameraControls uses by default.
         void controls.fitToSphere(mesh, true);
+      },
+      flyToPoint: (position, radius = 3) => {
+        flythroughGenRef.current++;
+        const controls = controlsRef.current;
+        if (!controls) return;
+        // Frame an ephemeral sphere around the point — same code path as
+        // cluster fly-to but for an arbitrary world coord (Bridge cites).
+        const sphere = new THREE.Sphere(
+          new THREE.Vector3(position[0], position[1], position[2]),
+          radius,
+        );
+        void controls.fitToSphere(sphere, true);
       },
       resetView: () => {
         flythroughGenRef.current++;

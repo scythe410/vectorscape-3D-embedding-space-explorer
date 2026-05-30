@@ -35,9 +35,17 @@ export interface FlythroughKeyframe {
   holdMs?: number;
 }
 
+/** Extra info on a cluster-pick event so the host can implement multi-select. */
+export interface ClusterPickOptions {
+  /** True when the click carried Shift / Cmd / Ctrl — toggle-in-selection. */
+  additive: boolean;
+}
+
 /** Imperative handle the host can ref to drive the camera. */
 export interface VectorScapeHandle {
   flyTo: (clusterId: ClusterCentroid["id"]) => void;
+  /** Frame a single world-space point. Radius controls the framing distance. */
+  flyToPoint: (position: [number, number, number], radius?: number) => void;
   resetView: () => void;
   /** Snap (or smoothly transition) to an explicit camera + target pose. */
   setLookAt: (
