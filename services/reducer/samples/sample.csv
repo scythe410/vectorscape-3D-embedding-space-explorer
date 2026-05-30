@@ -1,0 +1,61 @@
+id,topic,body
+1,cooking,How long should I roast a whole chicken at 400 degrees
+2,cooking,Best technique for searing a ribeye steak in a cast iron pan
+3,cooking,Substitute for buttermilk in pancake batter
+4,cooking,Why do my chocolate chip cookies always come out flat
+5,cooking,How to knead bread dough without a stand mixer
+6,cooking,Tips for making fluffy scrambled eggs every morning
+7,cooking,How long does fresh pasta dough need to rest before rolling
+8,cooking,Best oil for deep frying chicken wings at home
+9,cooking,How to caramelize onions slowly without burning them
+10,cooking,Difference between baking powder and baking soda in recipes
+11,cooking,How to properly season a new cast iron skillet at home
+12,cooking,Why does my pizza dough not rise enough overnight
+13,cooking,Best way to poach an egg without it falling apart
+14,cooking,How long do you marinate chicken thighs before grilling
+15,cooking,Tips for making homemade ice cream without an ice cream maker
+16,cooking,How to brine a turkey before Thanksgiving for juicier meat
+17,cooking,Best technique for slicing onions without crying so much
+18,cooking,Why does my risotto always turn out gummy not creamy
+19,cooking,How to render bacon fat properly for cooking later
+20,cooking,Tips for making crispy roasted potatoes in the oven
+21,astronomy,How do black holes form from collapsing massive stars
+22,astronomy,What is the Hubble tension and why does it matter
+23,astronomy,Difference between dark matter and dark energy in cosmology
+24,astronomy,How does gravitational lensing reveal hidden galaxies
+25,astronomy,What can James Webb tell us about early universe galaxies
+26,astronomy,Why is the cosmic microwave background so important to physics
+27,astronomy,How do astronomers measure distances to nearby stars
+28,astronomy,What happens at the event horizon of a supermassive black hole
+29,astronomy,Are there really rogue planets drifting between the stars
+30,astronomy,How does parallax help us measure the distance to stars
+31,astronomy,Why are neutron stars some of the densest objects in the universe
+32,astronomy,What creates the beautiful aurora seen near Earth's poles
+33,astronomy,How long would it take to reach Proxima Centauri with current tech
+34,astronomy,What is the difference between a meteor and a meteorite exactly
+35,astronomy,Why do some galaxies have spiral arms while others are elliptical
+36,astronomy,How do astronomers detect exoplanets around distant stars
+37,astronomy,What is the great attractor pulling our galaxy across space
+38,astronomy,Why do pulsars spin so fast after a supernova collapse
+39,astronomy,How was the age of the universe estimated at 13.8 billion years
+40,astronomy,What would happen if a gamma ray burst hit Earth tomorrow
+41,programming,When should I use TypeScript instead of plain JavaScript
+42,programming,Best way to structure a Next.js app with the App Router
+43,programming,How to debounce input events in React without lag
+44,programming,Difference between useEffect and useLayoutEffect in React
+45,programming,How to handle authentication securely in a Node.js backend
+46,programming,Tips for writing fast SQL queries on large Postgres tables
+47,programming,Why is my React component re-rendering so many times
+48,programming,How to set up a monorepo with bun workspaces from scratch
+49,programming,Best practices for error handling in async Python code
+50,programming,How does the Rust borrow checker prevent memory bugs at compile time
+51,programming,When to choose Postgres over MongoDB for a new project
+52,programming,Why does my Docker image keep getting so large to deploy
+53,programming,How to handle race conditions in a Go program with goroutines
+54,programming,Best way to cache API responses in a Next.js application
+55,programming,Tips for reducing bundle size in a large React application
+56,programming,How to write good unit tests for an Express API endpoint
+57,programming,Difference between SSR and SSG in Next.js page rendering
+58,programming,How to migrate a JavaScript codebase to TypeScript incrementally
+59,programming,Best practices for managing secrets in a Node.js production app
+60,programming,Why does my Python script run faster with NumPy than pure loops

@@ -132,3 +132,49 @@ Append-only running memory of the VectorScape build. Read first, append always.
 **Unfinished / broken:** None for this prompt. FPS at 100k with bloom+fog wasn't programmatically measured (no headless WebGL probe in this session); the spike's exact GPU-resident pattern is preserved, which is the load-bearing thing for that target.
 
 **Next:** Prompt 4 — reducer service: MiniLM → conditional PCA → PaCMAP → HDBSCAN + CLI harness.
+
+---
+
+## 2026-05-30 — Prompt 4: reducer pipeline + /embed-reduce + CLI
+
+**What:** Built the embed → reduce → cluster → persist pipeline behind `POST /embed-reduce` and a CLI harness. Verified end-to-end against the cloud Supabase project on a 60-row sample CSV.
+
+**Files added/changed:**
+
+- `services/reducer/pyproject.toml` — added sentence-transformers, scikit-learn, pacmap, umap-learn, hdbscan, numpy, pandas, psycopg[binary,pool], pgvector, python-dotenv, typer, openai. Added `reducer-cli` console script. Extended hatch wheel packages to `["app", "reducer"]`.
+- `app/config.py` — loads `.env` from repo root + cwd; exports `DATABASE_URL`, `OPENAI_API_KEY`, `CACHE_DIR` (~/.cache/vectorscape/embeddings), `PCA_THRESHOLD=20000`, `COORD_SCALE=60`, `DEFAULT_EMBED_MODEL=all-MiniLM-L6-v2`, `EMBED_DIM=384`.
+- `app/embeddings.py` — `embed_texts(texts, embed_model)` with disk cache keyed on sha256(model || text), sharded `aa/bb/<hash>.npy`. Local MiniLM is default and lazy-loaded (torch is slow to import). OpenAI path only fires when `embed_model='openai'` AND `OPENAI_API_KEY` is set; uses `text-embedding-3-small` with native `dimensions=384` truncation, then L2-normalizes to match MiniLM's `normalize_embeddings=True` default.
+- `app/pipeline.py` — `run_pipeline(texts, embed_model, reducer) -> PipelineResult`. Conditional PCA-100 only at/above `PCA_THRESHOLD` (matches CLAUDE.md: PaCMAP handles raw 384-dim below 20k). PaCMAP default with `init="pca"` and `n_neighbors=min(10, n-1)`; UMAP alternative with `n_neighbors=min(15, n-1)`. HDBSCAN with `min_cluster_size=max(5, round(sqrt(n)/2))` and `prediction_data=False`; per-point `probabilities_` captured. Medoid = point nearest the centroid in 3D coord space. Coords are mean-centered then scaled so the longest half-extent equals `COORD_SCALE` (60). Cluster labels default to `"Cluster N"` placeholders for the future LLM-naming pass.
+- `app/db.py` — psycopg connection with `pgvector.psycopg.register_vector`. `ensure_project()` creates/fetches; `write_results()` flips status pending→reducing, deletes prior points/clusters for the project, bulk `executemany` inserts points (with embedding ndarray and probability), then clusters with `medoid_point_id` resolved from pre-generated UUIDs, then flips status→ready and updates `point_count`. On exception in the API path, status flips to error.
+- `app/api.py` — `POST /embed-reduce` accepts `{project_id?, rows, text_column, embed_model, reducer, name?, tenant_id?}`. Strips empty/null text values; 400 if `text_column` is missing on any row or no non-empty rows survive.
+- `app/main.py` — wires the router under the existing app.
+- `app/cli.py` — `typer` CLI; `uv run reducer-cli sample.csv --text-column body --name X [--limit N] [--reducer pacmap|umap]`. Prints n_points, n_clusters, n_noise, used_pca, reducer, embed_model, runtime, project_id.
+- `reducer/__init__.py`, `reducer/cli.py` — shim so `python -m reducer.cli` works alongside the console script (the underlying package is still `app`).
+- `samples/make_sample.py`, `samples/sample.csv` — 60-row fixture, three thematic clusters (cooking / astronomy / programming).
+
+**Decisions / deviations:**
+
+- **Cache is filesystem, not Redis.** The threshold for using arq+Redis (per CLAUDE.md) is async job orchestration for >10k rows, not embedding cache. A two-level sharded `.npy` cache is the simpler primitive and matches "re-uploading the same CSV is free."
+- **PCA threshold left at the spec's ~20k.** Verified `used_pca=False` at n=60.
+- **Cluster medoid is computed in normalized 3D coord space, not embedding space.** Cheaper and more faithful to what the engine will fly the camera to. The spec's wording allowed either; will revisit if the visual feel suggests otherwise.
+- **Noise points get `cluster_id=NULL`** in the DB (HDBSCAN's `-1` mapped to NULL) so the cluster FK semantics stay clean. Probability is still stored.
+- **executemany over COPY.** At MVP scale (≤ a few thousand) the difference is negligible and executemany kept the inserts trivially debuggable. Will move to `cursor.copy()` if/when uploads routinely cross 50k.
+- **HDBSCAN `prediction_data=False`.** We don't need approximate-predict yet; saves memory.
+- **`reducer/cli.py` shim** because the package on disk is `app` but the prompt spec invokes `python -m reducer.cli`. Re-exports the typer app rather than duplicating logic.
+- **OpenAI truncated to 384 dims** (native param) so writes fit `points.embedding extensions.vector(384)` without schema changes.
+
+**Verified:**
+
+- `uv sync --extra dev` — clean install.
+- `uv run ruff check app reducer samples` → All checks passed.
+- `uv run pytest -q` → 1 passed (existing health test).
+- `uv run python -m reducer.cli samples/sample.csv --text-column body --name "cli smoke"` → wrote 60 points + 4 clusters + 1 noise, status='ready', point_count=60, used_pca=False, runtime 113s (dominated by first-time MiniLM download + torch import + PaCMAP warmup; warm runs will be much faster thanks to the embedding cache).
+- Cloud DB confirmed via `supabase db query --linked`: 60 points, 4 clusters, all clusters have `medoid_point_id`, `vector_dims(embedding)=384`, probabilities span [0, 1], coords centered on 0 with longest half-extent = 60.0 (matches `COORD_SCALE`).
+- Test project deleted after verification.
+
+**Unfinished / broken:**
+
+- `.env` had a stale Supabase pooler hostname (`aws-0-ap-northeast-1.pooler.supabase.com`) that errored with `tenant/user not found`. Supabase rotated the project to `aws-1-`; updated `.env` (gitignored, not committed). The DATABASE_URL in `.env.example` still references `aws-0-` as a generic placeholder, which is fine.
+- No reducer-side integration test against the DB (would require live cloud credentials in CI). The CLI run is the integration smoke for now.
+
+**Next:** Prompt 5 — wire the web app to the reducer (upload UI → POST /embed-reduce → poll status → render in `<VectorScape>`).
