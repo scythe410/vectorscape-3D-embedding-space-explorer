@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+tests/
+samples/
+*.md
+!README.md
+.env
+.env.*
