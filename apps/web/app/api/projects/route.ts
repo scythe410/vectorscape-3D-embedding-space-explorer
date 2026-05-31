@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import Papa from "papaparse";
+import { ReducerConfigError, reducerHeaders, reducerUrl, REDUCER_URL } from "@/lib/reducer";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-const REDUCER_URL = process.env.REDUCER_URL || "http://127.0.0.1:8000";
 const BUCKET = "csv-uploads";
+// Hard cap on uploaded CSV size. Inputs are read fully into memory + parsed
+// synchronously by papaparse; without a cap a 100MB CSV stalls the Node main
+// thread for seconds. 15MB ≈ ~100k typical text rows — well above sandbox use.
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -19,6 +23,20 @@ function safeName(name: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  // Early size cap — reject before reading the body so a 100MB upload can't
+  // exhaust memory or stall the Node main thread on Papa.parse. The browser
+  // sends Content-Length on multipart uploads; this gate fires before we
+  // call request.formData().
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > MAX_UPLOAD_BYTES) {
+    return NextResponse.json(
+      {
+        error: `upload too large: ${contentLength.toLocaleString()} bytes (max ${MAX_UPLOAD_BYTES.toLocaleString()})`,
+      },
+      { status: 413 },
+    );
+  }
+
   const supabase = await createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
@@ -47,6 +65,16 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof File)) return bad("missing file");
   if (!textColumn) return bad("missing text_column");
   if (!file.name.toLowerCase().endsWith(".csv")) return bad("file must be a .csv");
+  // Defense-in-depth: re-check the parsed file's size in case the multipart
+  // Content-Length didn't represent the inner part.
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json(
+      {
+        error: `file too large: ${file.size.toLocaleString()} bytes (max ${MAX_UPLOAD_BYTES.toLocaleString()})`,
+      },
+      { status: 413 },
+    );
+  }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const text = new TextDecoder("utf-8").decode(bytes);
@@ -93,18 +121,37 @@ export async function POST(request: NextRequest) {
 
   // Hand off to the reducer. The reducer uses service-role and bypasses RLS,
   // so we pass tenant_id explicitly to keep the row tenant-scoped.
-  const reducerResp = await fetch(`${REDUCER_URL}/embed-reduce`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      project_id: projectId,
-      tenant_id: tenantId,
-      rows,
-      text_column: textColumn,
-      name,
-      reducer,
-    }),
-  });
+  // Wrap the fetch — a downed reducer (ECONNREFUSED) would otherwise throw and
+  // Next would return an empty 500 body, leaving the client to choke on
+  // `.json()` with "Unexpected end of JSON input".
+  let reducerResp: Response;
+  try {
+    reducerResp = await fetch(reducerUrl("/embed-reduce"), {
+      method: "POST",
+      headers: reducerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        project_id: projectId,
+        tenant_id: tenantId,
+        rows,
+        text_column: textColumn,
+        name,
+        reducer,
+      }),
+    });
+  } catch (e) {
+    await supabase
+      .from("projects")
+      .update({ status: "error", error_message: "Reducer service unreachable." })
+      .eq("id", projectId);
+    if (e instanceof ReducerConfigError) {
+      return bad(e.message, 500);
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return bad(
+      `reducer unreachable at ${REDUCER_URL} — is the FastAPI service running? (${msg})`,
+      502,
+    );
+  }
   if (!reducerResp.ok) {
     const detail = await reducerResp.text().catch(() => "");
     await supabase

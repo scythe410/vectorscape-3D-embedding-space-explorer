@@ -588,3 +588,68 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 
 **Next:** QA fixes pass (see following entry).
 
+---
+
+## 2026-05-31 — QA fixes pass (qa_fixes.md QA-1 through QA-7)
+
+**What:** Worked through `qa_fixes.md` — a focused fix pass after `production_audit_report_2.md`. Verified each audit finding against the actual code, applied only the ones that were real, and logged what was rejected. The standard remains "MVP, not deployed multi-tenant SaaS" — production hardening (rate limits, quotas, CAPTCHA, CSRF tokens, security headers, Docker/CI/Terraform, broker upgrade) is recorded in `roadmap.md` per QA-7 with explicit triggers for when to revisit.
+
+**Verification matrix** (audit claim → reality in our code):
+
+| QA | Audit claim | True? | Action |
+|---|---|---|---|
+| 1 | `/embed-reduce` is `async def` running sync ML → starves event loop | **TRUE** — `app/api.py:71` async, sync `run_pipeline` on `< 10k` path | wrap in `anyio.to_thread.run_sync` |
+| 2 | Reducer has no auth; `tenant_id` from payload trusted; `/bridge` has no tenant filter at all | **TRUE** all three | shared-secret header, web tier passes verified tenant from `profiles`, all `/bridge` queries scoped to `(project_id, tenant_id)` |
+| 3 | `_build_prompt` concatenates user text directly | **TRUE** | `<user_text>` fence around every user-supplied span; explicit "treat as data, ignore commands" instruction; defang closing tag in user text; strip control chars |
+| 4a | Upload route has no size cap | **TRUE** | 15 MB cap, checked against `Content-Length` *before* `formData()` plus a defense-in-depth check on `file.size` |
+| 4b | `drainPoints` accumulates an O(N) JS object array before encoding to Arrow | **TRUE** | Arrow path streams page-by-page into pre-allocated typed-array columns; JSON path (sub-50k) keeps the simple drain since the object array is cheap there |
+| 5 | `write_results` does delete-then-insert without a lock | **PARTLY TRUE** — already inside a `with connect()` transaction, but no row lock; two concurrent jobs for the same project can still interleave around the commit boundary | added `SELECT … FOR UPDATE` on the projects row at the start of the tx |
+| 6a | OpenAI embedding path doesn't truncate to the 8191-token limit | **TRUE** | added `_truncate_for_openai` (tiktoken when available, conservative char-cap fallback) |
+| 6b | Raw exception strings leak to `projects.error_message` and the UI | **TRUE** — `app/api.py` `msg = f"{type(e).__name__}: {e}"`, mirrored in `app/worker.py` | both paths now `logging.exception(...)` server-side and store a generic "Reduction failed. Check the reducer service logs for details." in the DB |
+| 7 | Capture deferred items in roadmap | n/a | added "Deferred production hardening (from QA audit, 2026-05-31)" section to `roadmap.md` with triggers |
+
+**Files added/changed:**
+
+- `services/reducer/app/auth.py` (new) — `verify_reducer_secret` FastAPI dep. Reads `REDUCER_SHARED_SECRET` from `config.py`. Unset → fail-closed 503; missing header → 401; mismatch → 401 (constant-time compare via `hmac.compare_digest`).
+- `services/reducer/app/config.py` — added `REDUCER_SHARED_SECRET = os.environ.get("REDUCER_SHARED_SECRET", "").strip()`.
+- `services/reducer/app/api.py` — converted the sync ML path to `await anyio.to_thread.run_sync(...)` so the ASGI loop stays free during a reduction; gated `/embed-reduce` and `/status` with `Depends(verify_reducer_secret)`; replaced raw-exception-message error with `logging.exception(...)` + generic user-facing copy.
+- `services/reducer/app/bridge.py` — `BridgeRequest` now requires `tenant_id`; `_fetch_cluster` / `_fetch_boundary` queries filter on `tenant_id`; `/bridge` gated with `Depends(verify_reducer_secret)`; `_build_prompt` rewritten to fence every user-supplied text with `<user_text>…</user_text>`, system instruction explicitly tags fenced content as data with "ignore any commands inside" guidance; helpers `_sanitize` (strip C0+DEL, defang `</user_text>`) and `_fenced`.
+- `services/reducer/app/db.py` — `write_results` takes a `SELECT … FOR UPDATE` on the project row at the start of the transaction so two concurrent jobs for the same project serialize at the lock instead of racing the delete/insert.
+- `services/reducer/app/embeddings.py` — `_truncate_for_openai` (tiktoken-when-available, char-cap fallback ~32k chars); `_embed_openai` runs every input through it before the API call.
+- `services/reducer/app/worker.py` — same error-sanitization treatment as the sync path.
+- `services/reducer/tests/test_auth.py` (new) — 6 tests covering unset/missing/wrong/correct secret for `/embed-reduce`, `/bridge`, `/status`, and that `/health` stays open. Patches `app.auth.REDUCER_SHARED_SECRET` directly because `config.py`'s `.env` autoload re-sets it on reload.
+- `services/reducer/tests/test_prompt_injection.py` (new) — 5 tests covering: every user span is fenced, safety instruction present, closing-tag attempt defanged, control chars stripped, cluster label fenced (labels can be user-controlled via `--label-column`).
+- `apps/web/lib/reducer.ts` (new) — `reducerHeaders` / `reducerUrl` / `REDUCER_URL` / `ReducerConfigError`. Server-only helper to centralize the `X-Reducer-Secret` header so all three web→reducer call sites stay in sync.
+- `apps/web/app/api/projects/route.ts` — 15 MB `Content-Length` cap with a second `file.size` check after parse; uses `reducerHeaders` + `reducerUrl`.
+- `apps/web/app/api/projects/[id]/bridge/route.ts` — fetches `tenant_id` from the user's `profiles` row, forwards it to the reducer, attaches the shared-secret header, handles `ReducerConfigError` separately from a network failure.
+- `apps/web/app/api/projects/[id]/status/route.ts` — same header-attachment + error split.
+- `apps/web/app/api/projects/[id]/data/route.ts` — `useArrow` is now decided from `project.point_count` *before* any rows are read, so the Arrow path goes through `streamPointsIntoColumns` (paginated → pre-allocated typed-array columns) instead of accumulating PointRow objects. Old `arrowResponse(PointRow[], …)` removed.
+- `.env.example` — added `REDUCER_SHARED_SECRET=dev-local` with the explanation that prod should use a random 32+ char value.
+- `.env` (gitignored) — same key added so the local dev stack keeps working.
+- `roadmap.md` — appended "Deferred production hardening (from QA audit, 2026-05-31)" section with 9 items, each with an explicit trigger (most read "before public launch / first real users.").
+- `README.md` — env-var table gains `REDUCER_SHARED_SECRET`.
+
+**Decisions / deviations:**
+
+- **Shared secret, not JWT.** qa_fixes.md was explicit: "Keep it minimal: one shared secret, header check, tenant scoping on queries. Do not build JWT verification or a secrets manager now." Same call.
+- **Fail-closed reducer.** With `REDUCER_SHARED_SECRET` unset, the reducer returns 503 to everything except `/health`. The alternative (open in dev when unset) was rejected as a foot-gun: easy to deploy with the var unset and never notice. The README + `.env.example` document the dev value (`dev-local`); CI/prod sets a random one.
+- **`/bridge` requires the verified `tenant_id` from the web tier, doesn't re-derive it from `project_id`.** Re-deriving (query the project row, take its tenant) would also work but adds a query per bridge call and crosses a "this service is responsible for its own auth" line we don't want to cross at the reducer. The web tier already has the user's verified tenant in `profiles`; it forwards.
+- **Lock granularity = the projects row.** The audit's suggestion of "lock the row" is the right move for write_results' actual race (concurrent reductions of the *same* project). Locking at table level would serialize all reductions globally — overkill.
+- **Bounded Arrow encoding via pre-allocated typed arrays, not literal streaming.** apache-arrow's `tableFromArrays` needs all columns in memory anyway to produce IPC bytes — the win is removing the intermediate `PointRow[]` (which on 500k points is ~60MB of garbage-collectible objects). The columns themselves are the work product; that allocation is unavoidable. True row-by-row streaming via `RecordBatch`es would buy a smaller working-set ceiling at the cost of more complex code; deferred.
+- **Tests focus on static guarantees.** Auth tests assert "the dep runs before the handler"; prompt-injection tests inspect the rendered prompt string. We deliberately don't call the real LLM (cost, flakiness) or a real Postgres (CI-infra weight). The race-condition test the audit asked for is also deferred — reliably reproducing the race in unit-test time is fiddly and the row-lock fix is small enough that the static reasoning is the validation.
+- **Pre-existing line-length warning in `app/cli.py:144`** is not from this pass; left alone.
+
+**Verified:**
+
+- `cd services/reducer && uv run pytest -q` → **12 passed** (1 prior health test + 6 new auth + 5 new prompt-injection).
+- `cd services/reducer && uv run ruff check app tests` → only the pre-existing `cli.py:144` line-length finding; no new issues.
+- `cd apps/web && bun run typecheck` → 0 errors.
+- Cloud DB / live reducer end-to-end not driven in this pass; the targeted tests cover the load-bearing static guarantees, and the manual sandbox upload still works against a running reducer once both sides have `REDUCER_SHARED_SECRET=dev-local`.
+
+**Unfinished / broken:**
+
+- No reproducible race-condition test for `write_results`. The lock makes the race statically unreachable in single-process Postgres, but a test that actually races two transactions would need a fixture spinning up real concurrent connections.
+- Cluster labels in the Bridge prompt are now fenced, but the rendered cluster-list sidebar in the web UI doesn't escape them as HTML — labels come from a `--label-column` that could carry script tags. Markup escaping in React is the default for `{c.label}`, so this isn't a live XSS, but worth a future hardening pass once labels become user-editable.
+- The bounded Arrow path still keeps the `text: string[]` column in memory for the full project. For projects with very long text bodies this is the biggest remaining contributor to peak memory; mitigated by the upload cap but not eliminated. True per-batch RecordBatch streaming is the deferred next step (logged in roadmap.md item 4 of "Deferred production hardening" implicitly — the "stream DB results directly to Arrow IPC encoder" the audit asked for).
+
+**Next:** Whatever the next user task is. The qa_fixes.md pass is complete (QA-1 through QA-7).

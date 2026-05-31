@@ -13,6 +13,10 @@ load_dotenv(Path.cwd() / ".env", override=False)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+# Shared secret required on every web→reducer call. The Next.js server
+# attaches it as the X-Reducer-Secret header; the browser never sees it.
+# Empty in dev means the check is OPEN — set it in any deployed env.
+REDUCER_SHARED_SECRET = os.environ.get("REDUCER_SHARED_SECRET", "").strip()
 
 # Row count above which /embed-reduce hands off to the arq worker instead
 # of running inline. CLAUDE.md sets this threshold at 10k.

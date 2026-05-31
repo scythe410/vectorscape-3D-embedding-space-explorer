@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { ReducerConfigError, reducerHeaders, reducerUrl } from "@/lib/reducer";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-
-const REDUCER_URL = process.env.REDUCER_URL || "http://127.0.0.1:8000";
 
 export async function GET(
   _request: NextRequest,
@@ -30,9 +29,21 @@ export async function GET(
     return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
 
-  const reducerResp = await fetch(`${REDUCER_URL}/status/${id}`, {
-    cache: "no-store",
-  });
+  let reducerResp: Response;
+  try {
+    reducerResp = await fetch(reducerUrl(`/status/${id}`), {
+      cache: "no-store",
+      headers: reducerHeaders(),
+    });
+  } catch (e) {
+    if (e instanceof ReducerConfigError) {
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
+    return NextResponse.json(
+      { error: "reducer unreachable" },
+      { status: 502 },
+    );
+  }
   if (!reducerResp.ok) {
     const detail = await reducerResp.text().catch(() => "");
     return NextResponse.json(

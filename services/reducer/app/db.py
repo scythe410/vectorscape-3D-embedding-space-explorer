@@ -126,6 +126,20 @@ def write_results(
     if n != result.coords.shape[0]:
         raise ValueError("texts and coords length mismatch")
 
+    # Take a row-level lock on the projects row before any writes. Two
+    # concurrent reductions of the same project would otherwise race the
+    # delete + bulk insert (Postgres MVCC alone doesn't prevent the
+    # interleave where B's delete wipes A's just-inserted points right
+    # after A commits). The FOR UPDATE serializes them: the second
+    # writer blocks here until the first finishes, then proceeds on the
+    # post-commit snapshot. Cheap because the lock scope is one row.
+    row = conn.execute(
+        "select id from public.projects where id = %s for update",
+        (project_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"project {project_id} not found")
+
     set_status(conn, project_id, "reducing")
     _delete_existing(conn, project_id)
 

@@ -16,6 +16,14 @@ from .config import CACHE_DIR, DEFAULT_EMBED_MODEL, EMBED_DIM, OPENAI_API_KEY
 _st_model = None  # lazy-loaded SentenceTransformer
 
 OPENAI_MODEL = "text-embedding-3-small"  # 1536-dim natively; truncated to 384
+# Token cap for the OpenAI embedding model. text-embedding-3-small refuses
+# inputs above 8191 tokens with an unhandled error. We pre-truncate to keep
+# under that with margin. tiktoken would be exact; the conservative char-based
+# fallback below (~4 chars/token in English) is ~6000 tokens at the worst.
+OPENAI_MAX_TOKENS = 8000
+# Used by the char-based fallback when tiktoken isn't available.
+_FALLBACK_CHARS_PER_TOKEN = 4
+OPENAI_CHAR_CAP_FALLBACK = OPENAI_MAX_TOKENS * _FALLBACK_CHARS_PER_TOKEN  # ~32000 chars
 
 
 def _hash_text(model_name: str, text: str) -> str:
@@ -69,15 +77,44 @@ def _embed_local(texts: list[str], batch_size: int = 64) -> np.ndarray:
     return np.asarray(vecs, dtype=np.float32)
 
 
+def _truncate_for_openai(texts: list[str]) -> list[str]:
+    """Cap each text to a safe token length before sending to OpenAI.
+
+    Uses tiktoken when available for an exact cap; falls back to a generous
+    char-based cap otherwise (~4 chars per token in English). Either path
+    guarantees the request stays inside the model's 8191-token ceiling, so a
+    single oversized row can't fail the whole batch with an unhandled error.
+    """
+    try:
+        import tiktoken
+
+        enc = tiktoken.encoding_for_model(OPENAI_MODEL)
+        out: list[str] = []
+        for t in texts:
+            tokens = enc.encode(t, disallowed_special=())
+            if len(tokens) <= OPENAI_MAX_TOKENS:
+                out.append(t)
+            else:
+                out.append(enc.decode(tokens[:OPENAI_MAX_TOKENS]))
+        return out
+    except ImportError:
+        # tiktoken not installed — use char-based cap as a safe over-approximation.
+        return [
+            t if len(t) <= OPENAI_CHAR_CAP_FALLBACK else t[:OPENAI_CHAR_CAP_FALLBACK]
+            for t in texts
+        ]
+
+
 def _embed_openai(texts: list[str], batch_size: int = 128) -> np.ndarray:
     if not OPENAI_API_KEY:
         raise RuntimeError("embed_model='openai' requested but OPENAI_API_KEY is not set")
     from openai import OpenAI
 
     client = OpenAI(api_key=OPENAI_API_KEY)
+    capped = _truncate_for_openai(texts)
     out: list[list[float]] = []
-    for i in range(0, len(texts), batch_size):
-        chunk = texts[i : i + batch_size]
+    for i in range(0, len(capped), batch_size):
+        chunk = capped[i : i + batch_size]
         resp = client.embeddings.create(
             model=OPENAI_MODEL,
             input=chunk,

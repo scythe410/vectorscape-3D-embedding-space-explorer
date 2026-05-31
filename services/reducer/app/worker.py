@@ -59,11 +59,20 @@ async def embed_reduce_job(
         await set_progress(project_id, stage="ready", pct=100.0)
         await clear_progress(project_id)
         return summary
-    except Exception as exc:
-        msg = f"{type(exc).__name__}: {exc}"
+    except Exception:
+        # Log the full exception for operators; only a generic message reaches
+        # the user via projects.error_message (QA-6 — no raw Python/Postgres
+        # exception text in the UI).
+        import logging
+        logging.exception("embed_reduce_job failed for project %s", project_id)
         try:
             with connect() as conn:
-                set_status(conn, project_id, "error", error_message=msg)
+                set_status(
+                    conn,
+                    project_id,
+                    "error",
+                    error_message="Reduction failed. Check the reducer service logs for details.",
+                )
         finally:
             await clear_progress(project_id)
         raise
