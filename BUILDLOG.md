@@ -509,3 +509,51 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 - The form's no-JS path is a regular `<form>` POST but the route only accepts JSON — without JS, a submit would 400. Acceptable for a hero-CTA landing; could be widened to also accept `application/x-www-form-urlencoded` if no-JS support becomes a goal.
 
 **Next:** Prompt 12 — feel polish across the surfaces (per `prompt_flow.md`).
+
+---
+
+## 2026-05-31 — Prompt 12: feel polish (motion, atmosphere, morph, ambient drift)
+
+**What:** The "make navigation feel be the product" pass. Tuned camera damping for cinematic fly-to + drag-coast, lifted the bloom luminance floor so only cluster cores glow, opt-in DOF as an "HQ" mode, proximity-based cluster labels for the galaxy↔architectural morph, and a near-imperceptible idle drift so the space breathes when nobody's touching it. Verified the point budget, single-draw-call constraint, and GPU-resident attribute pattern all survived.
+
+**Files added/changed:**
+
+- `packages/engine/src/scene/AmbientDrift.tsx` — new. Listens to `controlstart` / `transitionstart` / `rest` on CameraControls, tracks idle seconds, and after a 3.5s settle starts adding tiny per-frame deltas to `azimuthAngle` (~0.012 rad/s = ~0.7°/s) plus a slow sine bob on `polarAngle` (~±0.015 rad over a 22s period). Eases in over 1.5s so drift starts as an exhale, not a snap. Any user input pauses it immediately. Writes camera angles only — zero BufferAttribute work per frame.
+- `packages/engine/src/scene/ClusterLabels.tsx` — new. Drei `<Html>` overlay per cluster with proximity-based opacity (smootherstep ramp: fully visible inside `fadeEnd=60`, invisible outside `fadeStart=140`, behind-camera cull via forward-dot). `distanceFactor=50` so labels scale with approach. Glass styling per design.md §4: dark translucent pill, hairline border, backdrop-blur, soft text shadow so they read against bright nebula cores. Labels live as DOM nodes so bloom can't smear them — "selective bloom on the data only" is enforced by physics, not config.
+- `packages/engine/src/VectorScape.tsx` — three feel tunings + three new props:
+  - `smoothTime` 0.4 → 0.65 (cinematic damp on fly-to); `draggingSmoothTime` 0.1 → 0.14 (drag stays responsive, release coasts); `dollySpeed` 0.8 → 0.7 (calm wheel zoom); explicit `azimuthRotateSpeed` / `polarRotateSpeed` / `truckSpeed` so the gesture feel doesn't drift on a controls upgrade.
+  - `bloomThreshold` lifted off 0 to `0.18` — dim outliers and fog-faded mid-field no longer bloom, only confident cluster cores. `luminanceSmoothing` 0.6 → 0.55 for a slightly crisper ramp around the threshold.
+  - `fogDensity` default 0.012 → 0.011 — gentler far-field falloff so depth reads as scale, not a wall.
+  - New props: `enableDOF` (opt-in `<DepthOfField>` with focusDistance=0.012, focalLength=0.04, bokehScale=3.2, height=720), `enableAmbientDrift` (default true), `showClusterLabels` (default false — hosts opt in per surface).
+  - The EffectComposer is wrapped per-mode (with-DOF / without-DOF) rather than passing conditionals as children — `@react-three/postprocessing`'s composer types require concrete `ReactElement`s, and a remount is cheap because the user toggle is rare.
+- `apps/web/app/lens/LensViewer.tsx` — opts in to `showClusterLabels` (the cinematic surface wants constellation names), adds HQ pill toggle bottom-right that wires `enableDOF`. Pill hides during the intro flythrough so it doesn't compete with the cinematic.
+- `apps/web/app/sandbox/SandboxViewer.tsx` — adds the same HQ toggle bottom-right. Labels stay off in the sandbox (sidebar list is the canonical cluster pick UI; canvas labels would duplicate).
+
+**Decisions / deviations:**
+
+- **Ambient drift writes camera angles, not the scene root.** Two reasons: (a) rotating the world group would mutate cluster positions under CameraControls, breaking fly-to; (b) `controls.azimuthAngle += delta` writes the controls' *target* angle, which camera-controls' damping then chases — the displayed motion is intrinsically smooth and pausing on user input is automatic (any new target snaps the chase to the new value). Writes one float per frame; the constraint about "no per-frame CPU attribute writes" is about BufferAttribute mutation, not uniform transforms.
+- **Drift uses event listeners, not polling `controls.active`.** `controls.active` flickers during damping and would race the drift loop. The `controlstart` / `transitionstart` / `rest` triple gives clean intent boundaries: user grabs it → stop drifting; controls settle → start the idle timer.
+- **Cluster labels via drei `<Html>` not `<Text>`.** `<Text>` is in-scene 3D text — would compete for bloom luminance and force a layer-exclusion dance. DOM `<Html>` overlays sit above the WebGL framebuffer, so bloom can't touch them by construction. K-cluster scale (~14 demo, ~50 typical) makes DOM cost a non-issue. Trade: labels don't z-occlude with foreground points, but proximity fade hides them when the camera is past the cluster anyway.
+- **Morph thresholds in absolute world units (60 / 140).** The reducer always normalizes the longest half-extent to `COORD_SCALE=60`, so absolute thresholds work for any baked galaxy without a per-project tune. Labels reach full opacity right at the canonical scale, so the "architectural arrival" feel lands exactly where the camera tends to settle after fly-to.
+- **DOF defaults off everywhere.** design.md is explicit: "off by default (it's the most expensive effect); on for screenshots and slow exploration." Even the lens demo, which is small enough to afford it, defaults off so first-time visitors hit the cheap, fast path. The HQ toggle is one click away. EffectComposer is remounted on toggle rather than reordering its children at runtime — postprocessing's pass chain doesn't recompose cleanly on conditional children, and the remount is invisible because it happens on an explicit user click.
+- **Bloom threshold raise (0 → 0.18) matches the brightness floor.** `uMinBrightness=0.18` is the lower bound of probability-modulated point brightness, so any luminance below ~0.18 belongs to outliers or fog-dimmed midfield — exactly the pixels we *don't* want haloing. With luminanceSmoothing=0.55 the ramp stays gentle so the visual transition from "doesn't bloom" → "blooms" is continuous, not a hard line. Net effect: cores read as distinct stars instead of a foggy wash.
+- **Smoothing values within the design.md band.** "smoothTime ≈ 0.4–0.8s" — 0.65 lands near the upper-middle, which is where fly-to reads as "arriving" rather than "panning." Tried 0.8 first; it felt sluggish on short flights between adjacent clusters in the lens. 0.65 keeps the cinematic feel without making the user wait.
+- **No regression to the spike's GPU pattern.** `PointsCloud` is untouched. Voxel filter unchanged. `THREE.Points` count: still one. Per-frame work added: AmbientDrift (~10 ops on idle frames, early-return otherwise), ClusterLabels (K vector ops + K DOM opacity writes — K is cluster count, typically <50). On a 350k-point render this is sub-microsecond against the GPU pipeline cost.
+- **Background security review of the prompt-11 commit (waitlist) flagged two MEDIUM findings — info-disclosure / email-enumeration oracle from the `already: true` differentiation, and verbose `error.message` reflection on insert failure.** Not addressed in this prompt (out of scope: the polish pass shouldn't be mixed with security work in one commit). Logged here so they're not lost; should be the first item in a follow-up hygiene pass.
+
+**Verified:**
+
+- `bun --filter engine typecheck` → 0 errors.
+- `bun --filter engine build` → dist 17.46 kB (was 12.91 kB; +4.5 kB for AmbientDrift + ClusterLabels + DOF effect). Still tiny.
+- `cd apps/web && bun run typecheck` → 0 errors.
+- `cd apps/web && bun run build` → compiles. `/sandbox` First Load 111 kB (unchanged), `/lens` 102 kB (unchanged) — the polish lands in the shared engine chunk, not page-specific code.
+- Headless WebGL frame-time can't be measured from this session; the load-bearing perf constraints (single draw call, no per-frame attribute writes, voxel ≤budget) are static-analyzable and were re-read. The browser-felt cinematic improvements are a manual eyeball pass.
+
+**Unfinished / broken:**
+
+- No automated 60fps measurement at the budget. The point budget itself is enforced by the voxel filter (unchanged in this prompt); whether the GPU holds 60fps with bloom+DOF+SMAA at 350k points depends on the host machine and is a user-verifiable thing rather than a code property.
+- The HQ toggle currently flips DOF only. A "labels on/off in sandbox" or DPR cap toggle could live in the same control. Not added because design.md treats DOF as the canonical quality lever; multi-toggle is feature-creep.
+- Cluster labels render text from `c.label` directly. Long labels (e.g. full taxonomies) overflow the pill — could add ellipsis. Real SKM galaxy labels are short newsgroup names, so this hasn't bitten yet.
+- Waitlist security findings (see decisions): not patched in this commit.
+
+**Next:** Out of `prompt_flow.md`'s sequenced prompts (12 was the last). Follow-up candidates: waitlist security hardening, headless perf harness (e.g. `headlessgl` + a render-loop tick budget), the deferred items in CLAUDE.md (time-lapse, other lenses, actual XR builds) when they come up the priority list.

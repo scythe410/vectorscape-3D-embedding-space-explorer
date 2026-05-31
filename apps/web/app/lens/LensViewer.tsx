@@ -37,6 +37,7 @@ export default function LensViewer() {
   const [fetchError, setFetchError] = useState<string | undefined>();
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
   const [flythroughRunning, setFlythroughRunning] = useState(false);
+  const [hqMode, setHqMode] = useState(false);
   const handleRef = useRef<VectorScapeHandle | null>(null);
   const startedRef = useRef(false);
 
@@ -100,6 +101,8 @@ export default function LensViewer() {
         ref={handleRef}
         points={loaded.pointsData}
         clusters={loaded.centroids}
+        showClusterLabels
+        enableDOF={hqMode}
         onClusterSelect={(id) => {
           handleRef.current?.cancelFlythrough();
           setFlythroughRunning(false);
@@ -137,6 +140,23 @@ export default function LensViewer() {
         <div className="pointer-events-none absolute bottom-6 left-6 rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px] text-neutral-400 backdrop-blur-md">
           drag · scroll · click point · click cluster
         </div>
+      )}
+
+      {/* HQ toggle — DOF + bokeh. Off by default (expensive). */}
+      {!flythroughRunning && (
+        <button
+          type="button"
+          onClick={() => setHqMode((v) => !v)}
+          className={
+            "absolute bottom-6 right-6 rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur-md transition " +
+            (hqMode
+              ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
+              : "border-white/10 bg-black/40 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
+          }
+          title="Depth-of-field bokeh — best for screenshots and slow exploration"
+        >
+          {hqMode ? "HQ · on" : "HQ"}
+        </button>
       )}
 
       {/* Right rail: clusters + selection. Hidden during intro for cinematic feel. */}

@@ -1,6 +1,11 @@
 import { CameraControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Bloom, EffectComposer, SMAA } from "@react-three/postprocessing";
+import {
+  Bloom,
+  DepthOfField,
+  EffectComposer,
+  SMAA,
+} from "@react-three/postprocessing";
 import {
   forwardRef,
   useEffect,
@@ -10,6 +15,8 @@ import {
 } from "react";
 import * as THREE from "three";
 
+import { AmbientDrift } from "./scene/AmbientDrift";
+import { ClusterLabels } from "./scene/ClusterLabels";
 import { FlyToTargets, type FlyToTargetsHandle } from "./scene/FlyToTargets";
 import { PointPicker } from "./scene/PointPicker";
 import { PointsCloud } from "./scene/PointsCloud";
@@ -29,12 +36,39 @@ export interface VectorScapeProps {
   budget?: number;
   /** Background color (also fed into the fog for tonal continuity). */
   background?: string;
-  /** FogExp2 density. Default 0.012 matches the spike's "deep space" feel. */
+  /**
+   * FogExp2 density. 0.011 is the cinematic default — far field dissolves
+   * gently around 150 world units, mid-field stays readable. Lower = more
+   * star-chart, higher = closer-feeling.
+   */
   fogDensity?: number;
   /** Bloom intensity. Higher = more haze around bright cores. */
   bloomIntensity?: number;
+  /**
+   * Luminance floor for bloom contribution. Lifted off 0 so dim outliers and
+   * fog-dimmed midfield don't add to bloom — only confident cluster cores
+   * glow. Lower = haze everywhere, higher = sharp stars in dark space.
+   */
+  bloomThreshold?: number;
   /** Floor on the probability brightness curve. 0 fully kills outliers. */
   minBrightness?: number;
+  /**
+   * "High quality" depth-of-field. Default off — DOF is the most expensive
+   * effect we ship and not everyone wants it. design.md frames it as a soft
+   * bokeh that crisps the focused cluster and dreamifies the rest.
+   */
+  enableDOF?: boolean;
+  /**
+   * Subtle ambient drift when the user is idle. design.md: "When idle, the
+   * space drifts almost imperceptibly… a breath, not an animation." Default on.
+   */
+  enableAmbientDrift?: boolean;
+  /**
+   * Render cluster labels with proximity-based fade. Off by default — the lens
+   * cinematic wants them, the sandbox sidebar is canonical for picking. Hosts
+   * opt in per surface.
+   */
+  showClusterLabels?: boolean;
   /**
    * Fired when the user clicks an invisible centroid sphere. The second
    * argument exposes shift/cmd/ctrl modifier state so the host can implement
@@ -78,9 +112,13 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       clusters = [],
       budget = DEFAULT_BUDGET,
       background = "#06070b",
-      fogDensity = 0.012,
-      bloomIntensity = 1.2,
+      fogDensity = 0.011,
+      bloomIntensity = 1.15,
+      bloomThreshold = 0.18,
       minBrightness = 0.18,
+      enableDOF = false,
+      enableAmbientDrift = true,
+      showClusterLabels = false,
       onClusterSelect,
       onPointPick,
       pickPixelRadius,
@@ -146,7 +184,12 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             clusters={clusters}
             onClusterSelect={onClusterSelect}
             handleRef={handleRef}
+            enableAmbientDrift={enableAmbientDrift}
           />
+
+          {showClusterLabels && clusters.length > 0 && (
+            <ClusterLabels clusters={clusters} />
+          )}
 
           {onPointPick && (
             <PointPicker
@@ -157,15 +200,39 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             />
           )}
 
-          <EffectComposer multisampling={0}>
-            <Bloom
-              intensity={bloomIntensity}
-              luminanceThreshold={0.0}
-              luminanceSmoothing={0.6}
-              mipmapBlur
-            />
-            <SMAA />
-          </EffectComposer>
+          {/*
+            DOF first so subsequent passes work in focused space. focusRange
+            is generous so a whole cluster stays sharp once framed, with
+            everything outside softly dreamy. The composer is remounted when
+            the DOF toggle flips so the effect chain stays valid.
+          */}
+          {enableDOF ? (
+            <EffectComposer multisampling={0}>
+              <DepthOfField
+                focusDistance={0.012}
+                focalLength={0.04}
+                bokehScale={3.2}
+                height={720}
+              />
+              <Bloom
+                intensity={bloomIntensity}
+                luminanceThreshold={bloomThreshold}
+                luminanceSmoothing={0.55}
+                mipmapBlur
+              />
+              <SMAA />
+            </EffectComposer>
+          ) : (
+            <EffectComposer multisampling={0}>
+              <Bloom
+                intensity={bloomIntensity}
+                luminanceThreshold={bloomThreshold}
+                luminanceSmoothing={0.55}
+                mipmapBlur
+              />
+              <SMAA />
+            </EffectComposer>
+          )}
         </Canvas>
       </div>
     );
@@ -181,10 +248,12 @@ function SceneController({
   clusters,
   onClusterSelect,
   handleRef,
+  enableAmbientDrift,
 }: {
   clusters: ClusterCentroid[];
   onClusterSelect?: (id: ClusterCentroid["id"], opts: ClusterPickOptions) => void;
   handleRef: React.ForwardedRef<VectorScapeHandle>;
+  enableAmbientDrift: boolean;
 }) {
   const controlsRef = useRef<CameraControls>(null);
   const targetsRef = useRef<FlyToTargetsHandle>(null);
@@ -272,13 +341,25 @@ function SceneController({
 
   return (
     <>
+      {/*
+        Motion feel per design.md "Motion (the heart of it)":
+          - smoothTime 0.65 → fly-to decelerates into target like a craft.
+          - draggingSmoothTime 0.14 → drag stays responsive but the release
+            coasts and settles instead of stopping dead.
+          - dollySpeed 0.7 → wheel zoom is calm, not twitchy.
+          - infinityDolly false (default) keeps the world bounded.
+      */}
       <CameraControls
         ref={controlsRef}
         makeDefault
-        smoothTime={0.4}
-        draggingSmoothTime={0.1}
-        dollySpeed={0.8}
+        smoothTime={0.65}
+        draggingSmoothTime={0.14}
+        dollySpeed={0.7}
+        truckSpeed={2.2}
+        azimuthRotateSpeed={0.8}
+        polarRotateSpeed={0.8}
       />
+      {enableAmbientDrift && <AmbientDrift controlsRef={controlsRef} />}
       <FlyToTargets ref={targetsRef} clusters={clusters} onPick={onClusterSelect} />
     </>
   );

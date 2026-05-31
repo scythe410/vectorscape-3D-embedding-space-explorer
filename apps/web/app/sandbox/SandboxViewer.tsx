@@ -18,6 +18,7 @@ export default function SandboxViewer({ projectId }: Props) {
   const [fetchError, setFetchError] = useState<string | undefined>();
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
   const [selection, setSelection] = useState<number[]>([]);
+  const [hqMode, setHqMode] = useState(false);
   const handleRef = useRef<VectorScapeHandle | null>(null);
 
   useEffect(() => {
@@ -97,6 +98,7 @@ export default function SandboxViewer({ projectId }: Props) {
           ref={handleRef}
           points={loaded.pointsData}
           clusters={loaded.centroids}
+          enableDOF={hqMode}
           onClusterSelect={onClusterPick}
           onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
         />
@@ -110,6 +112,19 @@ export default function SandboxViewer({ projectId }: Props) {
         <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-1 text-[11px] text-neutral-400 backdrop-blur">
           Click cluster · scroll/drag to fly · shift-click two clusters to bridge
         </div>
+        <button
+          type="button"
+          onClick={() => setHqMode((v) => !v)}
+          className={
+            "absolute bottom-3 right-3 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur transition " +
+            (hqMode
+              ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
+              : "border-white/10 bg-black/50 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
+          }
+          title="Depth-of-field bokeh — best for screenshots and slow exploration"
+        >
+          {hqMode ? "HQ · on" : "HQ"}
+        </button>
       </div>
 
       <aside className="flex flex-col gap-3 overflow-hidden">
