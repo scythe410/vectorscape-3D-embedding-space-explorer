@@ -139,28 +139,30 @@ export default function LensViewer() {
         </button>
       )}
 
-      {/* Bottom-left: navigation hints, fade in after intro. */}
+      {/* Bottom-left toolbar: nav hints + HQ pill. Sit outside the right
+          rail's footprint (which is absolute right-6 top-6 bottom-6 w-72)
+          so neither gets stacked under it. The wrapper is pointer-events-
+          none so canvas drags pass through; the HQ button re-enables them
+          on itself so it stays clickable. */}
       {!flythroughRunning && (
-        <div className="pointer-events-none absolute bottom-6 left-6 rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px] text-neutral-400 backdrop-blur-md">
-          drag · scroll · click point · click cluster
+        <div className="pointer-events-none absolute bottom-6 left-6 flex items-center gap-3">
+          <div className="rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px] text-neutral-400 backdrop-blur-md">
+            drag · scroll · click point · click cluster
+          </div>
+          <button
+            type="button"
+            onClick={() => setHqMode((v) => !v)}
+            className={
+              "pointer-events-auto rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur-md transition " +
+              (hqMode
+                ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
+                : "border-white/10 bg-black/40 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
+            }
+            title="Depth-of-field bokeh — best for screenshots and slow exploration"
+          >
+            {hqMode ? "HQ · on" : "HQ"}
+          </button>
         </div>
-      )}
-
-      {/* HQ toggle — DOF + bokeh. Off by default (expensive). */}
-      {!flythroughRunning && (
-        <button
-          type="button"
-          onClick={() => setHqMode((v) => !v)}
-          className={
-            "absolute bottom-6 right-6 rounded-full border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur-md transition " +
-            (hqMode
-              ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
-              : "border-white/10 bg-black/40 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
-          }
-          title="Depth-of-field bokeh — best for screenshots and slow exploration"
-        >
-          {hqMode ? "HQ · on" : "HQ"}
-        </button>
       )}
 
       {/* Right rail: clusters + selection. Hidden during intro for cinematic feel. */}
