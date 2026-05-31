@@ -24,6 +24,18 @@ export const metadata: Metadata = {
   title: "VectorScape — fly through your embeddings",
   description:
     "An observatory of meaning. Upload a CSV, watch it cluster as a galaxy, and explore the gaps between ideas.",
+  icons: [
+    {
+      url: "/black-hole-16px.png",
+      sizes: "16x16",
+      type: "image/png",
+    },
+    {
+      url: "/black-hole-32px.png",
+      sizes: "32x32",
+      type: "image/png",
+    },
+  ],
 };
 
 export default function RootLayout({
