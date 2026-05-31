@@ -87,12 +87,17 @@ function fillDerivedBuffers(
   for (let i = 0; i < n; i++) {
     const cid = clusterIdAt(i);
     const rgb = cid == null ? NOISE_COLOR : clusterColor(cid);
-    color[i * 3] = rgb[0];
-    color[i * 3 + 1] = rgb[1];
-    color[i * 3 + 2] = rgb[2];
-    size[i] = 1.6;
     const p = probAt(i);
-    probability[i] = p ?? (cid == null ? 0.15 : 1);
+    const prob = p ?? (cid == null ? 0.15 : 1);
+    // HDR core boost: drive confident cluster pixels above 1.0 so additive
+    // overlap pushes into bloom range. Outliers floor at ~0.55, the same
+    // shape the spike used.
+    const bcore = 0.55 + prob * 1.15;
+    color[i * 3] = rgb[0] * bcore;
+    color[i * 3 + 1] = rgb[1] * bcore;
+    color[i * 3 + 2] = rgb[2] * bcore;
+    size[i] = 1.6;
+    probability[i] = prob;
   }
   return { color, size, probability };
 }
