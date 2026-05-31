@@ -38,3 +38,12 @@ yarn-error.log*
 
 # misc
 coverage/
+
+# internal docs & temp files
+production_audit_report_*.md
+qa_fixes.md
+dump.rdb
+CLAUDE.md
+BUILDLOG.md
+design.md
+roadmap.md
