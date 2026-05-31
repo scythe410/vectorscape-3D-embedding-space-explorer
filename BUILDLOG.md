@@ -557,3 +557,34 @@ Also confirmed visually: `bun run typecheck` clean; `/login` form shows magic-li
 - Waitlist security findings (see decisions): not patched in this commit.
 
 **Next:** Out of `prompt_flow.md`'s sequenced prompts (12 was the last). Follow-up candidates: waitlist security hardening, headless perf harness (e.g. `headlessgl` + a render-loop tick budget), the deferred items in CLAUDE.md (time-lapse, other lenses, actual XR builds) when they come up the priority list.
+
+---
+
+## 2026-05-31 — Manual-testing bug fixes (README, lens intro, reducer-unreachable, hydration noise)
+
+**What:** Caught during a real browser run-through. Three real bugs and one cosmetic — patched together because they're all the same "first time running the app end-to-end" surface.
+
+**Files added/changed:**
+
+- `README.md` (new) — covers prerequisites (Bun, Node, uv, Redis, Supabase CLI, hosted project), first-time setup, the three-terminal local run sequence (Redis → reducer → web), demo vs sandbox flow, env-var table, troubleshooting matrix, dev commands, hard constraints from CLAUDE.md. The repo had no README before.
+- `apps/web/app/api/projects/route.ts` — wrapped the reducer `fetch` in try/catch. ECONNREFUSED was bubbling past the route, Next returned an empty 500 body, and the client's `.json()` parse threw "Unexpected end of JSON input" — the worst kind of opaque error. Now: catches the network error, flips the project row to `status=error`, returns a 502 JSON body that names what's wrong ("reducer unreachable at http://127.0.0.1:8000 — is the FastAPI service running?").
+- `apps/web/app/sandbox/SandboxUI.tsx` — read the response as text first, then attempt JSON parse. So even a body-less 500 now surfaces as `upload failed (500, empty response)` instead of a parse error.
+- `apps/web/app/lens/LensViewer.tsx` — flythrough start pulled from `[0, 38, 240]` → `[0, 32, 130]` and the remaining keyframes tightened proportionally. With `fogDensity=0.011`, depth 240 gives a fog factor of ~0.001 (effectively black) — the cinematic was supposed to dive *out* of fog, but the first ~2s before motion picked up looked like the page was broken. Starting at depth 130 gives ~0.17 fog factor (faint distant nebula, visibly present from frame 1).
+- `apps/web/app/layout.tsx` — added `suppressHydrationWarning` to `<body>`. Browser extensions (ColorZilla `cz-shortcut-listen`, Grammarly, LastPass, …) inject attributes onto `<body>` before React hydrates, and React's default behavior is to log an indistinguishable-from-bug hydration warning. This is the React-recommended workaround for an unrelated extension-vs-React problem.
+
+**Decisions / deviations:**
+
+- README placed at repo root, not in `apps/web`. The monorepo as a whole is what people clone; a workspace-level README would mislead.
+- Lens fix is a coordinate change, not a fog-density change. Dimming the fog further to make depth 240 visible would have flattened all far-field falloff in the rest of the app. The dive needs to *start* visible; the rest of the path is fine.
+- The route-level try/catch surfaces the raw fetch error text in the dev message. That's fine pre-launch; in production we'd want to log the raw cause and return a sanitized message (matches the broader QA-6 work in the next entry).
+
+**Verified:**
+
+- `cd apps/web && bun run typecheck` → 0 errors.
+- Manual: refreshed `/lens` after the fix — galaxy visible from frame 1, intro dives smoothly through it.
+- Manual: stopped reducer, uploaded a CSV — error panel reads "reducer unreachable at http://127.0.0.1:8000 — is the FastAPI service running?" instead of "Unexpected end of JSON input".
+
+**Unfinished / broken:** none from this batch.
+
+**Next:** QA fixes pass (see following entry).
+

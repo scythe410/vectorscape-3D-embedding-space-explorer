@@ -36,7 +36,16 @@ export default function RootLayout({
       lang="en"
       className={`${fraunces.variable} ${dmSans.variable} ${jetbrains.variable}`}
     >
-      <body className="font-body">{children}</body>
+      {/*
+        suppressHydrationWarning: browser extensions (ColorZilla, Grammarly,
+        LastPass, etc.) routinely inject attributes onto <body> *before* React
+        hydrates — `cz-shortcut-listen`, `data-new-gr-c-s-check-loaded`, etc.
+        React then logs a hydration warning that has nothing to do with our
+        code. Suppressing it on body only is the React-recommended workaround.
+      */}
+      <body className="font-body" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }

@@ -20,16 +20,20 @@ const DEMO_URL = "/demo/skm-galaxy.json";
  * half-extent is COORD_SCALE=60, so anchor poses can be expressed in absolute
  * world units and still frame any baked galaxy sensibly.
  *
- * Reads as a slow approach → first dive → swing across → gentle pull back to
- * the user's home pose. Total ~15s.
+ * Reads as a distant approach → first dive → swing across → gentle pull back
+ * to the user's home pose. Total ~15s.
+ *
+ * Start pose chosen so the galaxy is visible from frame 1: with fogDensity
+ * 0.011, exp(-d² × z²) ≈ 0.17 at z=120 — dim distant nebula, not a black
+ * screen. The previous z=240 sat at fog factor 0.001, which read as broken.
  */
 const FLYTHROUGH: FlythroughKeyframe[] = [
-  { position: [0, 38, 240], target: [0, 0, 0], smoothTime: 0.001, holdMs: 700 },
-  { position: [50, 24, 160], target: [0, 0, 0], smoothTime: 3.6, holdMs: 400 },
-  { position: [95, -10, 70], target: [10, -5, 0], smoothTime: 3.4, holdMs: 500 },
-  { position: [10, -55, 90], target: [-25, 5, 15], smoothTime: 3.6, holdMs: 500 },
-  { position: [-70, 30, 110], target: [-10, 0, -5], smoothTime: 3.6, holdMs: 400 },
-  { position: [0, 0, 90], target: [0, 0, 0], smoothTime: 2.8 },
+  { position: [0, 32, 130], target: [0, 0, 0], smoothTime: 0.001, holdMs: 600 },
+  { position: [50, 22, 100], target: [0, 0, 0], smoothTime: 3.0, holdMs: 400 },
+  { position: [85, -10, 65], target: [10, -5, 0], smoothTime: 3.2, holdMs: 500 },
+  { position: [15, -50, 80], target: [-25, 5, 15], smoothTime: 3.4, holdMs: 500 },
+  { position: [-65, 25, 95], target: [-10, 0, -5], smoothTime: 3.4, holdMs: 400 },
+  { position: [0, 0, 85], target: [0, 0, 0], smoothTime: 2.6 },
 ];
 
 export default function LensViewer() {

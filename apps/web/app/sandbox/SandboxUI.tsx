@@ -162,14 +162,28 @@ export default function SandboxUI() {
       fd.append("text_column", textColumn);
       fd.append("name", projectName || preview.file.name);
       const r = await fetch("/api/projects", { method: "POST", body: fd });
-      const body = await r.json();
-      if (!r.ok) {
-        setSubmitError(body.error || `upload failed (${r.status})`);
+      // The route always sends JSON on the happy path, but Next can emit an
+      // empty 500 body when an unhandled error bubbles. Read text first so we
+      // can surface the status code instead of "Unexpected end of JSON input".
+      const raw = await r.text();
+      let body: { error?: string; project_id?: string } = {};
+      if (raw) {
+        try {
+          body = JSON.parse(raw) as typeof body;
+        } catch {
+          body = { error: raw.slice(0, 300) };
+        }
+      }
+      if (!r.ok || !body.project_id) {
+        setSubmitError(
+          body.error || `upload failed (${r.status}${raw ? "" : ", empty response"})`,
+        );
         return;
       }
-      setProjectId(body.project_id);
+      const pid = body.project_id;
+      setProjectId(pid);
       setStatus({
-        project_id: body.project_id,
+        project_id: pid,
         status: "pending",
         point_count: 0,
         error_message: null,
