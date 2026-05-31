@@ -1,0 +1,121 @@
+id,topic,body
+1,astrophysics,The supermassive black hole at the center of M87 was the first ever directly imaged using the Event Horizon Telescope
+2,astrophysics,Gravitational waves from merging neutron stars were detected by LIGO and confirmed with electromagnetic observations
+3,astrophysics,The cosmic microwave background radiation is the afterglow of the Big Bang cooled to just 2.7 Kelvin
+4,astrophysics,Dark energy accounts for roughly 68 percent of the total energy budget of the observable universe
+5,astrophysics,Pulsars are rapidly spinning neutron stars that emit beams of electromagnetic radiation from their magnetic poles
+6,astrophysics,The Chandrasekhar limit of about 1.4 solar masses determines whether a white dwarf will collapse into a neutron star
+7,astrophysics,Type Ia supernovae serve as standard candles for measuring the accelerating expansion of the universe
+8,astrophysics,Hawking radiation is the theoretical thermal radiation predicted to be emitted by black holes due to quantum effects
+9,astrophysics,The James Webb Space Telescope has revealed galaxies forming just 300 million years after the Big Bang
+10,astrophysics,Magnetars are neutron stars with magnetic fields a quadrillion times stronger than Earth's magnetic field
+11,astrophysics,The Hubble tension refers to the discrepancy between local and early-universe measurements of the expansion rate
+12,astrophysics,Fast radio bursts are millisecond-duration pulses of radio emission from cosmological distances with unknown origins
+13,astrophysics,Gravitational lensing bends light from distant galaxies around massive foreground objects revealing hidden structures
+14,astrophysics,The Tolman-Oppenheimer-Volkoff limit sets the maximum mass of a neutron star before it collapses into a black hole
+15,astrophysics,Primordial nucleosynthesis in the first few minutes after the Big Bang produced hydrogen helium and trace lithium
+16,marine_biology,Coral bleaching occurs when rising ocean temperatures cause corals to expel their symbiotic zooxanthellae algae
+17,marine_biology,The deep ocean hydrothermal vents support entire ecosystems that thrive without sunlight using chemosynthesis
+18,marine_biology,Blue whales are the largest animals ever known to have lived reaching lengths of over 30 meters
+19,marine_biology,Bioluminescence in the deep sea is used by organisms for communication camouflage and attracting prey
+20,marine_biology,Sea turtles navigate thousands of kilometers across open ocean using the Earth's magnetic field for orientation
+21,marine_biology,The Great Barrier Reef is the world's largest coral reef system visible from space and home to thousands of species
+22,marine_biology,Cephalopods like octopuses can change their skin color and texture in milliseconds for camouflage and signaling
+23,marine_biology,Marine phytoplankton produce roughly half of the oxygen in Earth's atmosphere through photosynthesis
+24,marine_biology,The Mariana Trench reaches depths of nearly 11 kilometers and hosts extremophile organisms adapted to crushing pressure
+25,marine_biology,Whale sharks are filter feeders that can grow up to 12 meters and migrate across entire ocean basins
+26,marine_biology,Mangrove forests serve as critical nursery habitats for juvenile fish and protect coastlines from storm surges
+27,marine_biology,The Portuguese man o' war is actually a colonial organism made of specialized individual polyps working together
+28,marine_biology,Ocean acidification from absorbed CO2 threatens shellfish and corals by dissolving their calcium carbonate structures
+29,marine_biology,Dolphins use echolocation to hunt and communicate producing clicks that bounce off objects and return as echoes
+30,marine_biology,Kelp forests are among the most productive ecosystems on Earth supporting hundreds of species per square meter
+31,classical_music,Beethoven's Ninth Symphony was revolutionary for incorporating a full choir and vocal soloists into a symphonic work
+32,classical_music,The Well-Tempered Clavier by Bach demonstrated the viability of tuning keyboard instruments in all 24 major and minor keys
+33,classical_music,Debussy's use of whole-tone scales and parallel chord motion broke away from traditional harmonic progressions
+34,classical_music,The sonata-allegro form with its exposition development and recapitulation became the structural foundation of classical music
+35,classical_music,Stravinsky's Rite of Spring caused a riot at its Paris premiere in 1913 due to its dissonant harmonies and primal rhythms
+36,classical_music,Mozart composed over 600 works including 41 symphonies 27 piano concertos and several landmark operas
+37,classical_music,The Romantic period expanded the orchestra dramatically adding instruments like the tuba English horn and contrabassoon
+38,classical_music,Chopin's nocturnes are intimate piano pieces that explore the expressive capabilities of rubato and legato phrasing
+39,classical_music,Mahler's symphonies are massive works that blend orchestral and vocal forces to explore themes of life death and nature
+40,classical_music,The twelve-tone technique developed by Schoenberg organizes all twelve chromatic pitches into a fixed row or series
+41,classical_music,Vivaldi's Four Seasons is a set of violin concertos each accompanied by sonnets describing the characteristics of each season
+42,classical_music,Counterpoint is the art of combining independent melodic lines as perfected by Bach in his fugues and canons
+43,classical_music,Rachmaninoff's Piano Concerto No 2 is renowned for its sweeping romantic melodies and demanding technical passages
+44,classical_music,The minimalist movement led by composers like Glass and Reich uses repetitive patterns that evolve gradually over time
+45,classical_music,Wagner's concept of Gesamtkunstwerk aimed to unify music poetry visual arts and stagecraft into a total work of art
+46,machine_learning,Transformer architectures use self-attention mechanisms to process all positions in a sequence simultaneously
+47,machine_learning,Gradient descent optimizes neural network weights by iteratively adjusting parameters in the direction of steepest loss reduction
+48,machine_learning,Batch normalization stabilizes training by normalizing layer inputs and reduces sensitivity to learning rate choices
+49,machine_learning,Convolutional neural networks use learnable filters to extract spatial hierarchies of features from image data
+50,machine_learning,Dropout randomly deactivates neurons during training to prevent co-adaptation and reduce overfitting in deep networks
+51,machine_learning,Reinforcement learning agents learn optimal policies through trial and error by maximizing cumulative reward signals
+52,machine_learning,The attention mechanism allows models to focus on relevant parts of the input when generating each output token
+53,machine_learning,Generative adversarial networks pit a generator against a discriminator in a minimax game to produce realistic synthetic data
+54,machine_learning,Transfer learning leverages pretrained models on large datasets and fine-tunes them for specific downstream tasks
+55,machine_learning,Recurrent neural networks maintain hidden states that capture temporal dependencies in sequential data like text and speech
+56,machine_learning,The vanishing gradient problem makes it difficult to train deep networks because gradients shrink exponentially through layers
+57,machine_learning,Diffusion models generate high quality images by learning to reverse a gradual noising process step by step
+58,machine_learning,Mixture of experts architectures route different inputs to specialized subnetworks to increase model capacity efficiently
+59,machine_learning,Contrastive learning trains representations by pulling similar pairs together and pushing dissimilar pairs apart in embedding space
+60,machine_learning,Knowledge distillation compresses a large teacher model into a smaller student model while preserving most of the performance
+61,ancient_history,The Rosetta Stone enabled the decipherment of Egyptian hieroglyphics by providing the same text in three scripts
+62,ancient_history,The Roman aqueduct system transported water over hundreds of kilometers using gravity and precise engineering gradients
+63,ancient_history,Mesopotamian cuneiform is one of the earliest known writing systems developed by the Sumerians around 3400 BCE
+64,ancient_history,The Library of Alexandria was the ancient world's greatest repository of knowledge housing hundreds of thousands of scrolls
+65,ancient_history,The Indus Valley Civilization built sophisticated urban centers with grid-planned streets and advanced drainage systems
+66,ancient_history,Hannibal crossed the Alps with war elephants to invade the Roman Republic in one of military history's boldest maneuvers
+67,ancient_history,The Terracotta Army was buried with the first Emperor of China to protect him in the afterlife and contains over 8000 figures
+68,ancient_history,Ancient Greek democracy in Athens allowed male citizens to vote directly on legislation and executive decisions
+69,ancient_history,The Silk Road connected China to the Mediterranean enabling the exchange of goods ideas and diseases across continents
+70,ancient_history,Egyptian pyramids at Giza were constructed with remarkable precision aligning almost perfectly to true north
+71,ancient_history,The Code of Hammurabi is one of the oldest known written legal codes engraved on a basalt stele in ancient Babylon
+72,ancient_history,Roman concrete using volcanic ash was so durable that structures like the Pantheon still stand after nearly two thousand years
+73,ancient_history,The Persian Royal Road stretched over 2700 kilometers enabling rapid communication across the Achaemenid Empire
+74,ancient_history,Ancient Minoan civilization on Crete built elaborate palace complexes at Knossos with indoor plumbing and frescoed walls
+75,ancient_history,The Battle of Marathon in 490 BCE saw outnumbered Athenian forces defeat the Persian invasion on the plains near Athens
+76,culinary_science,The Maillard reaction between amino acids and reducing sugars creates the complex flavors and browning in cooked foods
+77,culinary_science,Sous vide cooking holds food at precise temperatures in vacuum-sealed bags producing perfectly even doneness throughout
+78,culinary_science,Emulsification combines immiscible liquids like oil and water using agents like lecithin or mustard to create stable sauces
+79,culinary_science,Fermentation by lactobacillus bacteria converts sugars to lactic acid giving yogurt kimchi and sourdough their tangy flavor
+80,culinary_science,Gluten forms when wheat flour proteins glutenin and gliadin hydrate and cross-link creating elastic dough structure
+81,culinary_science,Spherification uses sodium alginate and calcium chloride to create gel spheres that burst with liquid flavor in the mouth
+82,culinary_science,Caramelization occurs when sugars are heated above 170 degrees Celsius breaking down into hundreds of aromatic compounds
+83,culinary_science,The smoke point of cooking oils determines the temperature at which they begin to break down and produce acrid flavors
+84,culinary_science,Brining meat in a salt solution denatures surface proteins and increases moisture retention during cooking
+85,culinary_science,Enzyme activity in fruits like pineapple and papaya contains proteases that can tenderize meat but also prevent gelatin from setting
+86,culinary_science,Cold butter incorporated into flour creates flaky pastry layers as the water in the butter turns to steam during baking
+87,culinary_science,Tempering chocolate involves carefully controlling crystallization of cocoa butter to achieve a glossy snap and smooth texture
+88,culinary_science,Pressure cooking raises the boiling point of water to about 120 degrees Celsius dramatically speeding up braising and stewing
+89,culinary_science,The volatile compounds in fresh herbs are released differently when added at the start versus the end of cooking
+90,culinary_science,Acid coagulates proteins in ceviche effectively cooking raw fish through denaturation without any heat being applied
+91,urban_planning,The fifteen-minute city concept proposes that all essential services should be reachable within a short walk or bike ride
+92,urban_planning,Transit-oriented development clusters housing and commercial activity around public transportation hubs to reduce car dependence
+93,urban_planning,Mixed-use zoning allows residential commercial and office spaces in the same area creating vibrant walkable neighborhoods
+94,urban_planning,Green infrastructure like bioswales rain gardens and permeable pavements manage stormwater naturally in urban environments
+95,urban_planning,The superblock model in Barcelona reclaims streets from cars by redirecting traffic to perimeter roads freeing interior space
+96,urban_planning,Inclusionary zoning requires developers to include a percentage of affordable units in new residential construction projects
+97,urban_planning,Urban heat islands form when concrete and asphalt absorb and re-radiate solar energy raising city temperatures several degrees
+98,urban_planning,Complete streets design accommodates pedestrians cyclists transit riders and motorists safely on the same roadway
+99,urban_planning,Land value capture mechanisms fund public infrastructure by recouping some of the property value increases it generates
+100,urban_planning,Form-based codes regulate building shape and placement rather than use creating more predictable and cohesive streetscapes
+101,urban_planning,Tactical urbanism uses low-cost temporary interventions like parklets and painted plazas to test permanent design changes
+102,urban_planning,The garden city movement proposed self-contained communities surrounded by greenbelts balancing urban and rural living
+103,urban_planning,Accessory dwelling units allow homeowners to add small secondary housing on their lots increasing gentle urban density
+104,urban_planning,Congestion pricing charges vehicles for entering busy city centers during peak hours to reduce traffic and fund transit
+105,urban_planning,Participatory budgeting gives residents direct decision-making power over how a portion of public funds are spent in their area
+106,psychology,The marshmallow experiment tested delayed gratification in children and linked self-control to later life outcomes
+107,psychology,Cognitive dissonance theory explains the discomfort people feel when holding two contradictory beliefs simultaneously
+108,psychology,The bystander effect describes how individuals are less likely to help a victim when other people are present
+109,psychology,Confirmation bias leads people to seek out information that supports their existing beliefs while ignoring contradictory evidence
+110,psychology,Flow state is the experience of complete immersion and energized focus in an activity described by Csikszentmihalyi
+111,psychology,Attachment theory categorizes infant-caregiver bonds into secure anxious and avoidant styles that influence adult relationships
+112,psychology,The Dunning-Kruger effect describes how people with limited knowledge in a domain tend to overestimate their competence
+113,psychology,Neuroplasticity is the brain's ability to reorganize its structure and function in response to learning and experience
+114,psychology,The spotlight effect causes people to overestimate how much others notice their appearance and behavior in social situations
+115,psychology,Learned helplessness occurs when repeated exposure to uncontrollable events leads to passive acceptance of future adversity
+116,psychology,The peak-end rule shows that people judge experiences primarily by their most intense moment and how they ended
+117,psychology,Intrinsic motivation driven by internal satisfaction tends to produce more sustained engagement than external rewards alone
+118,psychology,The anchoring effect demonstrates how initial exposure to a number influences subsequent numerical judgments and estimates
+119,psychology,Mirror neurons fire both when an individual performs an action and when they observe the same action performed by others
+120,psychology,The availability heuristic leads people to judge the probability of events based on how easily examples come to mind

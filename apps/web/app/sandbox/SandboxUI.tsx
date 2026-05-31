@@ -32,7 +32,7 @@ type PreviewState = {
   totalRows: number;
 };
 
-const PREVIEW_LIMIT = 50;
+const PREVIEW_LIMIT = 20;
 
 export default function SandboxUI() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
