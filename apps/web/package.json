@@ -17,7 +17,7 @@
     "@supabase/supabase-js": "^2.106.2",
     "apache-arrow": "^18.0.0",
     "engine": "workspace:*",
-    "next": "15.0.3",
+    "next": "^15.1.0",
     "papaparse": "^5.5.3",
     "postprocessing": "6.36.7",
     "react": "19.0.0",
