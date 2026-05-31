@@ -103,11 +103,14 @@ export function synthesize(opts: SynthOptions): SynthResult {
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz) / sigma;
       const prob = Math.max(0.1, Math.exp(-0.5 * d * d));
       probability[w] = prob;
-      // Color: cluster hue, slightly desaturated for low-prob members.
-      color[w * 3] = r;
-      color[w * 3 + 1] = g;
-      color[w * 3 + 2] = b;
-      size[w] = 0.18 + 0.08 * prob;
+      // HDR boost: drive cluster-core pixels above 1.0 so additive overlap
+      // pushes into bloom range. Outside the core, b floors at ~0.55 — same
+      // shape the spike used.
+      const bcore = Math.min(1.7, Math.max(0.55, 1.7 - d));
+      color[w * 3] = r * bcore;
+      color[w * 3 + 1] = g * bcore;
+      color[w * 3 + 2] = b * bcore;
+      size[w] = 1.0 + rng() * 1.6;
       w++;
     }
   }
@@ -130,7 +133,7 @@ export function synthesize(opts: SynthOptions): SynthResult {
     color[w * 3] = 0.55;
     color[w * 3 + 1] = 0.7;
     color[w * 3 + 2] = 0.9;
-    size[w] = 0.1;
+    size[w] = 0.6 + rng() * 0.4;
     w++;
   }
 

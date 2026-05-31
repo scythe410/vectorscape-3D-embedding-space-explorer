@@ -22,6 +22,7 @@ export const POINTS_VERTEX = /* glsl */ `
   attribute float aProbability;
 
   uniform float uPixelRatio;
+  uniform float uSizeScale;
 
   varying vec3  vColor;
   varying float vProbability;
@@ -36,7 +37,8 @@ export const POINTS_VERTEX = /* glsl */ `
 
     // Perspective-correct point size. The 300.0 constant matches the spike's
     // visual scale — tune for art, not for correctness.
-    gl_PointSize = aSize * uPixelRatio * (300.0 / vFogDepth);
+    gl_PointSize = aSize * uSizeScale * uPixelRatio * (300.0 / vFogDepth);
+    gl_PointSize = clamp(gl_PointSize, 1.0, 64.0);
     gl_Position  = projectionMatrix * mvPosition;
   }
 `;
@@ -48,38 +50,47 @@ export const POINTS_FRAGMENT = /* glsl */ `
   uniform vec3  uFogColor;
   uniform float uFogDensity;
   uniform float uMinBrightness;
+  // Star-sprite shape. uCoreSharpness in [0, 1] — 0 is all halo, 1 is a hard
+  // pin-prick. uHaloStrength scales the soft outer glow. Together they let
+  // points stay crisp even when each sprite covers 40+ pixels (otherwise a
+  // single smoothstep falloff reads as defocused bokeh at large sizes).
+  uniform float uCoreSharpness;
+  uniform float uHaloStrength;
 
   varying vec3  vColor;
   varying float vProbability;
   varying float vFogDepth;
 
   void main() {
-    // Radial soft falloff in the sprite. discard outside the disc so the
-    // additive blend doesn't square-stamp.
     vec2  uv = gl_PointCoord - 0.5;
     float r  = length(uv);
     if (r > 0.5) discard;
 
-    // Gaussian-ish profile. ^3 keeps the highlight punchy.
-    float soft = smoothstep(0.5, 0.0, r);
-    soft = soft * soft * soft;
+    // Hard-edged core that scales as a *shape*, not a pixel-spread gradient.
+    // corePeak is where the core's solid portion ends; the smoothstep up to
+    // 0.5 antialiases the disc edge. With uCoreSharpness=1 the core is a
+    // tight bright dot regardless of how many pixels gl_PointSize covers.
+    float corePeak = mix(0.0, 0.45, uCoreSharpness);
+    float core = smoothstep(0.5, corePeak, r);
 
-    // Probability shapes the look: confident cluster cores glow; outliers
-    // fade to a faint dust. Brightness floors at uMinBrightness so we still
-    // see structure outside the cores.
-    float prob = clamp(vProbability, 0.0, 1.0);
-    float bright = mix(uMinBrightness, 1.0, prob);
-    // Alpha drops faster than brightness so low-probability points read as
-    // visual fog — present, but not asserting.
-    float alpha  = soft * mix(uMinBrightness * 0.4, 1.0, prob * prob);
+    // Soft halo for the additive glow. Squared so it concentrates near the
+    // center and falls off cleanly, which keeps cluster cores readable when
+    // dozens of halos overlap.
+    float halo = smoothstep(0.5, 0.0, r);
+    halo = halo * halo;
 
-    // FogExp2 by hand so additive blending still respects depth.
+    // Probability only drives alpha (so outliers read as dust, members read
+    // as solid). Color stays full-intensity; the data layer puts HDR (>1.0)
+    // into cluster cores so bloom can actually bite.
+    float prob  = clamp(vProbability, 0.0, 1.0);
+    float shape = clamp(core + halo * uHaloStrength, 0.0, 1.0);
+    float alpha = shape * mix(uMinBrightness, 1.0, prob);
+
+    // FogExp2 attenuates alpha only — additive blending should fade out into
+    // the background, not lerp toward the fog color (that washes color out).
     float fogFactor = exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
     fogFactor = clamp(fogFactor, 0.0, 1.0);
 
-    vec3 lit  = vColor * bright * (0.9 + 0.1 * sin(uTime * 0.6 + vProbability * 6.0));
-    vec3 outc = mix(uFogColor, lit, fogFactor);
-
-    gl_FragColor = vec4(outc, alpha * fogFactor);
+    gl_FragColor = vec4(vColor, alpha * fogFactor);
   }
 `;

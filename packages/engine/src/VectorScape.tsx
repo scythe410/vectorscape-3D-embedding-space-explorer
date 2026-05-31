@@ -42,6 +42,8 @@ export interface VectorScapeProps {
    * star-chart, higher = closer-feeling.
    */
   fogDensity?: number;
+  /** Toggle the bloom pass entirely. Default true. */
+  bloomEnabled?: boolean;
   /** Bloom intensity. Higher = more haze around bright cores. */
   bloomIntensity?: number;
   /**
@@ -52,6 +54,12 @@ export interface VectorScapeProps {
   bloomThreshold?: number;
   /** Floor on the probability brightness curve. 0 fully kills outliers. */
   minBrightness?: number;
+  /** Runtime multiplier on point size. 1.0 = baseline; <1 shrinks, >1 enlarges. */
+  pointSizeScale?: number;
+  /** Star-sprite core tightness. 0 = soft glow only, 1 = hard pin-prick. */
+  coreSharpness?: number;
+  /** Star-sprite outer-glow strength. 0 = no halo, ~1 = strong halo. */
+  haloStrength?: number;
   /**
    * "High quality" depth-of-field. Default off — DOF is the most expensive
    * effect we ship and not everyone wants it. design.md frames it as a soft
@@ -113,9 +121,13 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       budget = DEFAULT_BUDGET,
       background = "#06070b",
       fogDensity = 0.011,
-      bloomIntensity = 1.15,
-      bloomThreshold = 0.18,
-      minBrightness = 0.18,
+      bloomEnabled = true,
+      bloomIntensity = 1.2,
+      bloomThreshold = 0.7,
+      minBrightness = 0.51,
+      pointSizeScale = 1,
+      coreSharpness = 0.7,
+      haloStrength = 0.4,
       enableDOF = false,
       enableAmbientDrift = true,
       showClusterLabels = false,
@@ -178,6 +190,9 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             fogColor={fogColor}
             fogDensity={fogDensity}
             minBrightness={minBrightness}
+            sizeScale={pointSizeScale}
+            coreSharpness={coreSharpness}
+            haloStrength={haloStrength}
           />
 
           <SceneController
@@ -206,33 +221,38 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             everything outside softly dreamy. The composer is remounted when
             the DOF toggle flips so the effect chain stays valid.
           */}
-          {enableDOF ? (
-            <EffectComposer multisampling={0}>
+          {/*
+            EffectComposer remounts when the bloom/DOF toggles flip so the
+            effect chain stays valid (postprocessing doesn't hot-swap passes
+            cleanly). SMAA stays unconditionally — without it, antialias is
+            off (we set it that way on the Canvas so the composer owns AA).
+          */}
+          <EffectComposer
+            key={`${bloomEnabled}-${enableDOF}`}
+            multisampling={0}
+          >
+            {enableDOF ? (
               <DepthOfField
                 focusDistance={0.012}
                 focalLength={0.04}
                 bokehScale={3.2}
                 height={720}
               />
+            ) : (
+              <></>
+            )}
+            {bloomEnabled ? (
               <Bloom
                 intensity={bloomIntensity}
                 luminanceThreshold={bloomThreshold}
                 luminanceSmoothing={0.55}
                 mipmapBlur
               />
-              <SMAA />
-            </EffectComposer>
-          ) : (
-            <EffectComposer multisampling={0}>
-              <Bloom
-                intensity={bloomIntensity}
-                luminanceThreshold={bloomThreshold}
-                luminanceSmoothing={0.55}
-                mipmapBlur
-              />
-              <SMAA />
-            </EffectComposer>
-          )}
+            ) : (
+              <></>
+            )}
+            <SMAA />
+          </EffectComposer>
         </Canvas>
       </div>
     );

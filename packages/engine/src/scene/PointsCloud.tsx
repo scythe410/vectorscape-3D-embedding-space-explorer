@@ -15,6 +15,12 @@ interface PointsCloudProps {
   fogDensity: number;
   /** Brightness floor for low-probability points so outliers don't vanish. */
   minBrightness?: number;
+  /** Runtime multiplier on point size. 1.0 = current look. */
+  sizeScale?: number;
+  /** 0 = all soft halo, 1 = hard pin-prick. Default 0.7. */
+  coreSharpness?: number;
+  /** Outer glow strength multiplier. Default 0.4. */
+  haloStrength?: number;
 }
 
 /**
@@ -30,6 +36,9 @@ export function PointsCloud({
   fogColor,
   fogDensity,
   minBrightness = 0.18,
+  sizeScale = 1,
+  coreSharpness = 0.7,
+  haloStrength = 0.4,
 }: PointsCloudProps) {
   const pointsRef = useRef<THREE.Points>(null);
   const { gl } = useThree();
@@ -78,9 +87,12 @@ export function PointsCloud({
       uniforms: {
         uTime: { value: 0 },
         uPixelRatio: { value: pixelRatio },
+        uSizeScale: { value: sizeScale },
         uFogColor: { value: fogColor.clone() },
         uFogDensity: { value: fogDensity },
         uMinBrightness: { value: minBrightness },
+        uCoreSharpness: { value: coreSharpness },
+        uHaloStrength: { value: haloStrength },
       },
       vertexShader: POINTS_VERTEX,
       fragmentShader: POINTS_FRAGMENT,
@@ -98,7 +110,10 @@ export function PointsCloud({
     material.uniforms.uFogColor.value.copy(fogColor);
     material.uniforms.uFogDensity.value = fogDensity;
     material.uniforms.uMinBrightness.value = minBrightness;
-  }, [material, fogColor, fogDensity, minBrightness]);
+    material.uniforms.uSizeScale.value = sizeScale;
+    material.uniforms.uCoreSharpness.value = coreSharpness;
+    material.uniforms.uHaloStrength.value = haloStrength;
+  }, [material, fogColor, fogDensity, minBrightness, sizeScale, coreSharpness, haloStrength]);
 
   // Free GPU memory on unmount. Geometry and material are owned by us.
   useEffect(() => {
