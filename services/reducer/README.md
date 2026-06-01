@@ -33,6 +33,7 @@ Set these as **secrets** in the Space settings (Settings → Variables and secre
 | `REDUCER_SHARED_SECRET` | Must match the value set on the web app. Auth fails closed if unset. |
 | `DATABASE_URL` | Supabase Postgres connection string (service-role; bypasses RLS). |
 | `OPENAI_API_KEY` | Optional. Only used when callers request `embed_model=openai` or for `/bridge`. |
+| `GEMINI_API_KEY` | Optional. `/bridge` fallback when `OPENAI_API_KEY` isn't set — routes through Gemini's OpenAI-compatible endpoint (free tier on AI Studio). |
 | `REDUCER_ASYNC_THRESHOLD` | Set to `999999` here — no Redis on this Space, so all jobs must run inline. |
 
 ## Notes

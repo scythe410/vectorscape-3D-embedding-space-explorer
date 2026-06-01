@@ -12,6 +12,10 @@ load_dotenv(Path.cwd() / ".env", override=False)
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+# Gemini AI Studio key. When set (and OPENAI_API_KEY isn't), /bridge routes
+# through Gemini's OpenAI-compatible endpoint instead. Free tier on AI Studio
+# is sufficient for demo use; rate-limited and may train on inputs.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 # Shared secret required on every web→reducer call. The Next.js server
 # attaches it as the X-Reducer-Secret header; the browser never sees it.

@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from .auth import verify_reducer_secret
-from .config import OPENAI_API_KEY
+from .config import GEMINI_API_KEY, OPENAI_API_KEY
 from .db import connect
 
 router = APIRouter()
@@ -35,6 +35,9 @@ LLM_CHAR_CAP = 600
 WIRE_CHAR_CAP = 280
 # Chat model. Cheap + fast; the task is short-form explanation, not reasoning.
 LLM_MODEL = "gpt-4o-mini"
+# Gemini equivalent, used when GEMINI_API_KEY is set instead of OPENAI_API_KEY.
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
 class BridgeRequest(BaseModel):
@@ -207,20 +210,33 @@ def _build_prompt(a: dict, boundary_a: list[dict], b: dict, boundary_b: list[dic
 
 
 def _summarize(prompt: str) -> tuple[str, str]:
-    """Returns (summary, model_name)."""
-    if not OPENAI_API_KEY:
+    """Returns (summary, model_name).
+
+    Prefers OPENAI_API_KEY if set; otherwise falls back to GEMINI_API_KEY via
+    Gemini's OpenAI-compatible endpoint. With neither, returns the no-key
+    fallback message so the structural answer (medoids + boundary) still ships.
+    """
+    if OPENAI_API_KEY:
+        api_key = OPENAI_API_KEY
+        base_url: str | None = None
+        model = LLM_MODEL
+    elif GEMINI_API_KEY:
+        api_key = GEMINI_API_KEY
+        base_url = GEMINI_BASE_URL
+        model = GEMINI_MODEL
+    else:
         return (
-            "OPENAI_API_KEY is not set on the reducer, so no LLM summary was generated. "
-            "The medoids and boundary points for both clusters are listed below — they "
-            "carry the structural answer even without prose. Set the key to get a written "
-            "shared-theme / contrast explanation.",
+            "No LLM API key is set on the reducer (OPENAI_API_KEY or GEMINI_API_KEY), "
+            "so no written summary was generated. The medoids and boundary points for "
+            "both clusters are listed below — they carry the structural answer even "
+            "without prose. Set a key to get a written shared-theme / contrast explanation.",
             "fallback",
         )
     from openai import OpenAI
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
-        model=LLM_MODEL,
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -231,7 +247,7 @@ def _summarize(prompt: str) -> tuple[str, str]:
         temperature=0.4,
         max_tokens=320,
     )
-    return (resp.choices[0].message.content or "").strip(), LLM_MODEL
+    return (resp.choices[0].message.content or "").strip(), model
 
 
 def _to_examples(cluster: dict, boundary: list[dict]) -> list[BridgeExample]:
