@@ -40,6 +40,30 @@ GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
+class LLMStatusResponse(BaseModel):
+    # "openai" | "gemini" | "none" — which provider /bridge will use right now.
+    provider: Literal["openai", "gemini", "none"]
+    model: str
+    # True when the active provider's terms permit training on user inputs.
+    # Gemini AI Studio free tier is the only such path we expose; OpenAI API
+    # and the no-key fallback do not train on the data we send. The UI uses
+    # this flag to gate /bridge behind an explicit user-consent click.
+    may_train_on_data: bool
+
+
+@router.get(
+    "/llm-status",
+    response_model=LLMStatusResponse,
+    dependencies=[Depends(verify_reducer_secret)],
+)
+def llm_status() -> LLMStatusResponse:
+    if OPENAI_API_KEY:
+        return LLMStatusResponse(provider="openai", model=LLM_MODEL, may_train_on_data=False)
+    if GEMINI_API_KEY:
+        return LLMStatusResponse(provider="gemini", model=GEMINI_MODEL, may_train_on_data=True)
+    return LLMStatusResponse(provider="none", model="fallback", may_train_on_data=False)
+
+
 class BridgeRequest(BaseModel):
     project_id: str
     # tenant_id is the *verified* tenant the caller (Next.js server) already

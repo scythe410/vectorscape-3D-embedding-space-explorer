@@ -5,6 +5,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { clusterColor, type ClusterRow } from "./loadProject";
 
+type LLMStatus = {
+  provider: "openai" | "gemini" | "none";
+  model: string;
+  may_train_on_data: boolean;
+};
+
+// localStorage key for the Gemini-training consent flag. Tied to the provider
+// so if we later add another may-train backend, it gets its own gate.
+const GEMINI_CONSENT_KEY = "vectorscape:bridge-consent:gemini";
+
 export type BridgeExample = {
   id: string;
   text: string;
@@ -50,6 +60,48 @@ export default function BridgePanel({
   // doesn't clobber the current one.
   const reqIdRef = useRef(0);
 
+  const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
+  const [consented, setConsented] = useState(false);
+
+  // Pull provider info once; the user can't change it from the UI.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/api/llm-status", { cache: "no-store" });
+        if (!r.ok || cancelled) return;
+        const body = (await r.json()) as LLMStatus;
+        if (!cancelled) setLlmStatus(body);
+      } catch {
+        // Non-fatal: if status fails we behave as if no consent gate applies,
+        // and the bridge call will surface any real error itself.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Read prior consent from localStorage once we know which provider is live.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (llmStatus?.provider === "gemini") {
+      setConsented(window.localStorage.getItem(GEMINI_CONSENT_KEY) === "1");
+    } else {
+      setConsented(false);
+    }
+  }, [llmStatus?.provider]);
+
+  const needsConsent =
+    llmStatus?.may_train_on_data === true && !consented;
+
+  const grantConsent = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(GEMINI_CONSENT_KEY, "1");
+    }
+    setConsented(true);
+  }, []);
+
   const runBridge = useCallback(
     async (a: number, b: number) => {
       const myReq = ++reqIdRef.current;
@@ -78,15 +130,20 @@ export default function BridgePanel({
   );
 
   // Auto-fetch when two clusters are selected. Re-fires when the pair changes.
+  // Skip while a consent gate is pending — the user clicks through it to fire.
   useEffect(() => {
     if (selection.length !== 2) {
       setState({ kind: "idle" });
       reqIdRef.current++;
       return;
     }
+    if (needsConsent) {
+      setState({ kind: "idle" });
+      return;
+    }
     const [a, b] = selection;
     void runBridge(a, b);
-  }, [selection, runBridge]);
+  }, [selection, runBridge, needsConsent]);
 
   const onCitedClick = (ex: BridgeExample) => {
     handleRef.current?.flyToPoint([ex.x, ex.y, ex.z], 2.5);
@@ -131,26 +188,78 @@ export default function BridgePanel({
           <div className="space-y-3">
             <SelectionChips selection={selection} labelFor={aLabel} />
 
-            {state.kind === "loading" && (
+            {needsConsent && (
+              <GeminiConsentGate
+                model={llmStatus?.model ?? "gemini-2.5-flash"}
+                onAccept={grantConsent}
+              />
+            )}
+            {!needsConsent && state.kind === "loading" && (
               <div className="text-xs text-neutral-500">
                 Pulling medoids and boundary points…
               </div>
             )}
-            {state.kind === "error" && (
+            {!needsConsent && state.kind === "error" && (
               <div className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
                 {state.message}
               </div>
             )}
-            {state.kind === "ready" && (
+            {!needsConsent && state.kind === "ready" && (
               <BridgeReadout
                 result={state.result}
                 onCitedClick={onCitedClick}
               />
             )}
+            {!needsConsent && llmStatus?.may_train_on_data === true && (
+              <TrainingDataFootnote model={llmStatus.model} />
+            )}
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+function GeminiConsentGate({
+  model,
+  onAccept,
+}: {
+  model: string;
+  onAccept: () => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-100">
+      <div className="font-medium text-amber-200">
+        Heads up — free-tier AI in use
+      </div>
+      <p className="leading-relaxed text-amber-100/90">
+        No paid LLM key is configured, so summaries run through Google AI
+        Studio&apos;s free tier ({model}). Per Google&apos;s terms, inputs on
+        the free tier may be used to improve their models. We send a handful
+        of short text snippets from the two selected clusters — medoid plus
+        boundary points.
+      </p>
+      <p className="leading-relaxed text-amber-100/80">
+        Don&apos;t bridge clusters from confidential or personal data unless
+        you&apos;re OK with that.
+      </p>
+      <button
+        type="button"
+        onClick={onAccept}
+        className="mt-1 rounded-md border border-amber-700/60 bg-amber-900/40 px-2 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-900/70"
+      >
+        I understand — continue
+      </button>
+    </div>
+  );
+}
+
+function TrainingDataFootnote({ model }: { model: string }) {
+  return (
+    <div className="text-[10px] leading-snug text-amber-200/70">
+      Summarized via {model} (free tier) — inputs may be used by Google to
+      improve their models.
+    </div>
   );
 }
 
