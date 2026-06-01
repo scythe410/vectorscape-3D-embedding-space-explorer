@@ -1,9 +1,10 @@
 "use client";
 
-import { VectorScape, type VectorScapeHandle } from "engine";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { VectorScape, type PointsData, type VectorScapeHandle } from "engine";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BridgePanel from "./BridgePanel";
+import SearchPanel, { type SearchResult } from "./SearchPanel";
 import { clusterColor, loadProject, type LoadedProject } from "./loadProject";
 
 interface Props {
@@ -13,12 +14,18 @@ interface Props {
 // At most two clusters can be in the Bridge selection at once.
 const MAX_SELECTION = 2;
 
+// Probability values driving the shader brightness/alpha during search.
+// Matched points stay fully lit; everyone else dims into the background fog.
+const SEARCH_HIT_PROB = 1.0;
+const SEARCH_MISS_PROB = 0.04;
+
 export default function SandboxViewer({ projectId }: Props) {
   const [loaded, setLoaded] = useState<LoadedProject | null>(null);
   const [fetchError, setFetchError] = useState<string | undefined>();
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
   const [selection, setSelection] = useState<number[]>([]);
   const [hqMode, setHqMode] = useState(false);
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const handleRef = useRef<VectorScapeHandle | null>(null);
 
   useEffect(() => {
@@ -27,6 +34,7 @@ export default function SandboxViewer({ projectId }: Props) {
     setFetchError(undefined);
     setPickedIndex(null);
     setSelection([]);
+    setSearchResult(null);
 
     loadProject(projectId)
       .then((p) => {
@@ -42,6 +50,82 @@ export default function SandboxViewer({ projectId }: Props) {
       cancelled = true;
     };
   }, [projectId]);
+
+  /**
+   * Search-aware points data. When search is active, override the probability
+   * channel so matched points stay bright and the rest fade — using the
+   * existing per-point probability the shader already consumes for
+   * brightness/alpha. No new uniforms, no per-frame CPU work; rebuilds the
+   * GPU attribute once per search.
+   */
+  const displayPointsData: PointsData | null = useMemo(() => {
+    if (!loaded) return null;
+    if (!searchResult || searchResult.matches.length === 0) {
+      return loaded.pointsData;
+    }
+    const matchIndices = new Set<number>();
+    for (const m of searchResult.matches) {
+      const idx = loaded.indexById(m.id);
+      if (idx != null) matchIndices.add(idx);
+    }
+    if (matchIndices.size === 0) return loaded.pointsData;
+    const n = loaded.totalPoints;
+    const probability = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      probability[i] = matchIndices.has(i) ? SEARCH_HIT_PROB : SEARCH_MISS_PROB;
+    }
+    return {
+      position: loaded.pointsData.position,
+      color: loaded.pointsData.color,
+      size: loaded.pointsData.size,
+      probability,
+    };
+  }, [loaded, searchResult]);
+
+  // When search results land, fly to the strongest cluster of results — the
+  // cluster_id with the most matches. Falls back to the geometric mean of the
+  // match positions if the matches are mostly noise.
+  const flyToSearchResults = useCallback(
+    (result: SearchResult) => {
+      if (!loaded || result.matches.length === 0) return;
+      const counts = new Map<number, number>();
+      for (const m of result.matches) {
+        if (m.cluster_id == null) continue;
+        counts.set(m.cluster_id, (counts.get(m.cluster_id) ?? 0) + 1);
+      }
+      let best: number | null = null;
+      let bestCount = 0;
+      for (const [cid, c] of counts) {
+        if (c > bestCount) {
+          best = cid;
+          bestCount = c;
+        }
+      }
+      if (best != null && loaded.centroids.some((c) => Number(c.id) === best)) {
+        handleRef.current?.flyTo(best);
+        return;
+      }
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      for (const m of result.matches) {
+        cx += m.x;
+        cy += m.y;
+        cz += m.z;
+      }
+      const k = result.matches.length;
+      handleRef.current?.flyToPoint([cx / k, cy / k, cz / k], 6);
+    },
+    [loaded],
+  );
+
+  const onSearchResult = useCallback(
+    (result: SearchResult | null) => {
+      setSearchResult(result);
+      if (result && result.matches.length > 0) flyToSearchResults(result);
+    },
+    [flyToSearchResults],
+  );
 
   /**
    * Selection model:
@@ -96,7 +180,7 @@ export default function SandboxViewer({ projectId }: Props) {
       <div className="relative overflow-hidden rounded-lg border border-neutral-800 bg-black">
         <VectorScape
           ref={handleRef}
-          points={loaded.pointsData}
+          points={displayPointsData ?? loaded.pointsData}
           clusters={loaded.centroids}
           enableDOF={hqMode}
           onClusterSelect={onClusterPick}
@@ -128,11 +212,17 @@ export default function SandboxViewer({ projectId }: Props) {
       </div>
 
       <aside className="flex flex-col gap-3 overflow-hidden">
+        <SearchPanel
+          projectId={projectId}
+          active={searchResult}
+          onResult={onSearchResult}
+        />
+
         <section className="flex max-h-[40%] flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950/40">
           <header className="border-b border-neutral-900 px-3 py-2 text-xs uppercase tracking-wider text-neutral-400">
             Clusters
           </header>
-          <ul className="flex-1 overflow-y-auto text-sm">
+          <ul className="scrollbar-subtle flex-1 overflow-y-auto text-sm">
             <li>
               <button
                 type="button"
@@ -200,7 +290,7 @@ export default function SandboxViewer({ projectId }: Props) {
           <header className="border-b border-neutral-900 px-3 py-2 text-xs uppercase tracking-wider text-neutral-400">
             Selection
           </header>
-          <div className="flex-1 overflow-y-auto px-3 py-2 text-sm">
+          <div className="scrollbar-subtle flex-1 overflow-y-auto px-3 py-2 text-sm">
             {pickedPoint ? (
               <div className="space-y-2">
                 <div className="text-xs text-neutral-500">

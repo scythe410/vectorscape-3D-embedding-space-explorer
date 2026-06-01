@@ -29,6 +29,9 @@ export type LoadedProject = {
     cluster_id: number | null;
     cluster_probability: number | null;
   };
+  /** Map a server-side point UUID to its index in pointsData. Used by search
+   *  to translate matched ids back into buffer indices for highlighting. */
+  indexById: (id: string) => number | undefined;
   /** Tells the UI which path served the data (for the on-screen badge). */
   format: "json" | "arrow";
   /** ms spent in the parse + buffer-build step on the main thread. */
@@ -133,6 +136,8 @@ function fromJson(payload: JsonPayload): LoadedProject {
     (i) => payload.points[i].cluster_id,
     (i) => payload.points[i].cluster_probability,
   );
+  const idIndex = new Map<string, number>();
+  for (let i = 0; i < n; i++) idIndex.set(payload.points[i].id, i);
   const parseMs = performance.now() - t0;
 
   return {
@@ -149,6 +154,7 @@ function fromJson(payload: JsonPayload): LoadedProject {
         cluster_probability: p.cluster_probability,
       };
     },
+    indexById: (id) => idIndex.get(id),
     format: "json",
     parseMs,
   };
@@ -176,6 +182,7 @@ function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
   const clusterIds = table.getChild("cluster_id")!.toArray() as Int32Array;
   const probs = table.getChild("cluster_probability")!.toArray() as Float32Array;
   const textCol = table.getChild("text")!;
+  const idCol = table.getChild("id");
 
   // Interleave xyz into a single position buffer for THREE.BufferAttribute.
   // This is the only mandatory copy; everything else stays as views.
@@ -196,6 +203,17 @@ function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
       return Number.isNaN(p) ? null : p;
     },
   );
+  // Build an id→index map lazily on first lookup. Decoding 350k UUID strings
+  // up front would re-introduce the parse stall the Arrow path was built to
+  // eliminate; pay the cost only when the user actually runs a search.
+  let idIndex: Map<string, number> | null = null;
+  const buildIdIndex = (): Map<string, number> => {
+    const m = new Map<string, number>();
+    if (idCol) {
+      for (let i = 0; i < n; i++) m.set(String(idCol.get(i) ?? ""), i);
+    }
+    return m;
+  };
   const parseMs = performance.now() - t0;
 
   return {
@@ -212,6 +230,10 @@ function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
         cluster_id: c < 0 ? null : c,
         cluster_probability: Number.isNaN(p) ? null : p,
       };
+    },
+    indexById: (id) => {
+      if (idIndex === null) idIndex = buildIdIndex();
+      return idIndex.get(id);
     },
     format: "arrow",
     parseMs,

@@ -138,6 +138,7 @@ async function streamPointsIntoColumns(
   clusterId: Int32Array;
   probability: Float32Array;
   text: string[];
+  id: string[];
   n: number;
 }> {
   let capacity = Math.max(estimatedN, PAGE);
@@ -147,6 +148,7 @@ async function streamPointsIntoColumns(
   let clusterId = new Int32Array(capacity);
   let probability = new Float32Array(capacity);
   const text: string[] = new Array(capacity);
+  const id: string[] = new Array(capacity);
   let filled = 0;
 
   const grow = (newCap: number) => {
@@ -167,6 +169,7 @@ async function streamPointsIntoColumns(
     clusterId = growI32(clusterId);
     probability = grow32(probability);
     text.length = capacity;
+    id.length = capacity;
   };
 
   for (let from = 0; ; from += PAGE) {
@@ -191,6 +194,7 @@ async function streamPointsIntoColumns(
       clusterId[filled] = p.cluster_id ?? -1;
       probability[filled] = p.cluster_probability ?? Number.NaN;
       text[filled] = p.text;
+      id[filled] = p.id;
       filled++;
     }
     if (data.length < PAGE) break;
@@ -204,8 +208,9 @@ async function streamPointsIntoColumns(
     clusterId = clusterId.subarray(0, filled).slice();
     probability = probability.subarray(0, filled).slice();
     text.length = filled;
+    id.length = filled;
   }
-  return { x, y, z, clusterId, probability, text, n: filled };
+  return { x, y, z, clusterId, probability, text, id, n: filled };
 }
 
 function arrowResponseFromColumns(
@@ -214,6 +219,7 @@ function arrowResponseFromColumns(
   clusters: ClusterRow[],
 ): Response {
   const table = tableFromArrays({
+    id: cols.id,
     x: cols.x,
     y: cols.y,
     z: cols.z,
