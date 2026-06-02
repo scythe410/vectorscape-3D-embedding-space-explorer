@@ -13,6 +13,8 @@ with the project_id so /search can't be tricked into crossing tenants.
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,6 +32,16 @@ router = APIRouter()
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 200
 WIRE_CHAR_CAP = 280
+
+# How many named regions to surface in the summary. Three is enough to convey
+# "mostly X, with some Y and Z" without turning into a list.
+REGION_TOP_N = 3
+
+# A label is a placeholder if it's missing or matches the pre-labels-commit
+# `Cluster N` shape the reducer used to emit. The region summary degrades to
+# dot-highlight-only when every matched cluster's label is a placeholder —
+# naming "Cluster 3" tells the user nothing the dots don't already.
+_PLACEHOLDER_RE = re.compile(r"^cluster\s+\d+$", re.IGNORECASE)
 
 
 class SearchRequest(BaseModel):
@@ -54,11 +66,29 @@ class SearchMatch(BaseModel):
     score: float
 
 
+class Region(BaseModel):
+    cluster_id: int
+    label: str
+    count: int
+
+
 class SearchResponse(BaseModel):
     project_id: str
     query: str
     embed_model: str
     matches: list[SearchMatch]
+    # Aggregation of matches by cluster_id, joined against this project's
+    # cluster labels. Sorted by count desc. Noise matches (cluster_id is
+    # null) are excluded — they don't belong to a named region by definition.
+    regions: list[Region]
+    # False when every region's label is a "Cluster N" placeholder. The
+    # client uses this to gate the plain-language summary: without real
+    # names the summary is meaningless, so degrade to dot-highlight only.
+    labels_are_real: bool
+    # Short plain-language summary like "mostly Senate races and campaign
+    # finance". Empty string when labels are placeholders or no clustered
+    # matches landed.
+    summary: str
 
 
 def _truncate(s: str | None, n: int) -> str:
@@ -117,6 +147,93 @@ def _search_points(
     ]
 
 
+def _fetch_cluster_labels(
+    conn: psycopg.Connection,
+    project_id: str,
+    tenant_id: str,
+    cluster_ids: list[int],
+) -> dict[int, str | None]:
+    """Look up labels for the given cluster_ids on this project. Tenant-scoped
+    so a forged project_id can't pull labels from another tenant."""
+    if not cluster_ids:
+        return {}
+    rows = conn.execute(
+        """
+        select cluster_id, label
+          from public.clusters
+         where project_id = %s and tenant_id = %s
+           and cluster_id = any(%s)
+        """,
+        (project_id, tenant_id, cluster_ids),
+    ).fetchall()
+    return {int(r[0]): r[1] for r in rows}
+
+
+def _is_placeholder(label: str | None) -> bool:
+    if not label:
+        return True
+    s = label.strip()
+    if not s:
+        return True
+    return bool(_PLACEHOLDER_RE.match(s))
+
+
+def _compose_summary(regions: list[Region], total_matches: int) -> str:
+    """Plain-language headline. Pre-condition: regions is sorted desc by count
+    and every label is non-placeholder (caller checks). Empty string when
+    there's nothing useful to say."""
+    if not regions or total_matches <= 0:
+        return ""
+    top = regions[0]
+    share = top.count / total_matches
+    if share >= 0.8 or len(regions) == 1:
+        return f"mostly {top.label}"
+    if len(regions) == 2:
+        return f"{regions[0].label} and {regions[1].label}"
+    return f"{regions[0].label}, {regions[1].label}, and {regions[2].label}"
+
+
+def _summarize_regions(
+    matches: list[SearchMatch],
+    labels: dict[int, str | None],
+) -> tuple[list[Region], bool, str]:
+    """Aggregate matches by cluster_id, joining in labels. Returns
+    (regions, labels_are_real, summary).
+
+    - Noise matches (cluster_id is None) are excluded — they aren't in any
+      named region.
+    - regions is sorted by count desc, capped at REGION_TOP_N.
+    - labels_are_real is True iff at least one matched cluster has a
+      non-placeholder label. The summary is empty when this is False.
+    """
+    counts: dict[int, int] = {}
+    for m in matches:
+        if m.cluster_id is None:
+            continue
+        counts[m.cluster_id] = counts.get(m.cluster_id, 0) + 1
+    if not counts:
+        return [], False, ""
+
+    # Sort by count desc, then by cluster_id asc for a deterministic tie-break.
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    labels_are_real = any(not _is_placeholder(labels.get(cid)) for cid, _ in ordered)
+
+    regions: list[Region] = []
+    for cid, count in ordered[:REGION_TOP_N]:
+        raw = labels.get(cid)
+        label = raw.strip() if raw and raw.strip() else f"Cluster {cid}"
+        regions.append(Region(cluster_id=cid, label=label, count=count))
+
+    if not labels_are_real:
+        return regions, False, ""
+
+    # Compose the summary only from regions whose labels aren't placeholders.
+    named = [r for r in regions if not _is_placeholder(labels.get(r.cluster_id))]
+    total_named = sum(r.count for r in named)
+    summary = _compose_summary(named, total_named)
+    return regions, True, summary
+
+
 @router.post(
     "/search",
     response_model=SearchResponse,
@@ -148,9 +265,22 @@ def search(req: SearchRequest) -> SearchResponse:
             req.limit,
         )
 
+        # Pull labels only for clusters that actually appear in the matches.
+        unique_cluster_ids = sorted(
+            {m.cluster_id for m in matches if m.cluster_id is not None}
+        )
+        labels = _fetch_cluster_labels(
+            conn, req.project_id, req.tenant_id, unique_cluster_ids
+        )
+
+    regions, labels_are_real, summary = _summarize_regions(matches, labels)
+
     return SearchResponse(
         project_id=req.project_id,
         query=query,
         embed_model=embed_model,
         matches=matches,
+        regions=regions,
+        labels_are_real=labels_are_real,
+        summary=summary,
     )

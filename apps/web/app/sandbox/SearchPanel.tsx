@@ -12,19 +12,43 @@ export type SearchMatch = {
   score: number;
 };
 
+export type SearchRegion = {
+  cluster_id: number;
+  label: string;
+  count: number;
+};
+
 export type SearchResult = {
   query: string;
   embed_model: string;
   matches: SearchMatch[];
+  // Aggregation by cluster_id, joined with project labels. Sorted by count.
+  // Always present (possibly empty); the legibility layer renders it only
+  // when labels_are_real is true.
+  regions: SearchRegion[];
+  // False when every region's label is a "Cluster N" placeholder — gate
+  // for the plain-language summary. Region names without real meanings
+  // would add noise, not legibility.
+  labels_are_real: boolean;
+  // Plain-language headline ("mostly Senate races and campaign finance").
+  // Empty string when labels are placeholders.
+  summary: string;
 };
 
 interface Props {
   projectId: string;
   active: SearchResult | null;
   onResult: (result: SearchResult | null) => void;
+  /** Fly to a cluster centroid when the user clicks a region chip. */
+  onFlyToCluster?: (clusterId: number) => void;
 }
 
-export default function SearchPanel({ projectId, active, onResult }: Props) {
+export default function SearchPanel({
+  projectId,
+  active,
+  onResult,
+  onFlyToCluster,
+}: Props) {
   const [query, setQuery] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -65,11 +89,16 @@ export default function SearchPanel({ projectId, active, onResult }: Props) {
           setError(msg);
           return;
         }
-        const json = JSON.parse(text) as SearchResult;
+        const json = JSON.parse(text) as Partial<SearchResult>;
         onResult({
           query: json.query ?? trimmed,
-          embed_model: json.embed_model,
+          embed_model: json.embed_model ?? "",
           matches: Array.isArray(json.matches) ? json.matches : [],
+          regions: Array.isArray(json.regions) ? json.regions : [],
+          // Old responses (pre-region-summary) won't carry these fields;
+          // default to "no summary" so the UI degrades to dot-only.
+          labels_are_real: json.labels_are_real === true,
+          summary: typeof json.summary === "string" ? json.summary : "",
         });
       } catch (e) {
         if (myReq !== reqIdRef.current) return;
@@ -146,6 +175,38 @@ export default function SearchPanel({ projectId, active, onResult }: Props) {
             No points matched “{active.query}”. Try a different phrasing.
           </div>
         )}
+        {/* Region summary: the legibility layer. Only renders when real
+            cluster labels exist for this project. Without real names the
+            summary would say "Cluster 3 and Cluster 7" — useless — so we
+            gate hard and fall back to dot-highlight only. */}
+        {active &&
+          active.matches.length > 0 &&
+          active.labels_are_real &&
+          active.regions.length > 0 && (
+            <div className="space-y-1.5 rounded-md border border-amber-900/30 bg-amber-950/10 px-2 py-1.5">
+              {active.summary && (
+                <div className="text-xs leading-snug text-amber-100/90">
+                  {active.summary}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1">
+                {active.regions.map((r) => (
+                  <button
+                    key={r.cluster_id}
+                    type="button"
+                    onClick={() => onFlyToCluster?.(r.cluster_id)}
+                    className="rounded-full border border-amber-300/30 bg-amber-300/5 px-2 py-0.5 text-[10px] text-amber-200 hover:border-amber-300/60 hover:bg-amber-300/10"
+                    title={`${r.count} match${r.count === 1 ? "" : "es"} in ${r.label} · click to fly`}
+                  >
+                    <span className="truncate">{r.label}</span>
+                    <span className="ml-1 font-mono text-amber-200/60">
+                      {r.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         {active && active.matches.length > 0 && (
           <div className="text-[10px] text-neutral-500">
             highlighting nearest {active.matches.length} · embed_model{" "}

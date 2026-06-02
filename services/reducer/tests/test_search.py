@@ -33,18 +33,27 @@ from app.main import app
 class _FakeCursor:
     """Records the (sql, params) of every execute and returns prepared rows."""
 
-    def __init__(self, project_row: tuple[Any, ...] | None, points_rows: list[tuple[Any, ...]]):
+    def __init__(
+        self,
+        project_row: tuple[Any, ...] | None,
+        points_rows: list[tuple[Any, ...]],
+        cluster_rows: list[tuple[Any, ...]] | None = None,
+    ):
         self._project_row = project_row
         self._points_rows = points_rows
+        self._cluster_rows = cluster_rows or []
         self._mode: str = ""
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
 
     def execute(self, sql: str, params: tuple[Any, ...]) -> _FakeCursor:
         self.calls.append((sql, params))
-        # Distinguish the two queries by which table the SQL hits.
-        if "from public.projects" in sql.lower() or "public.projects" in sql:
+        # Distinguish the three queries by which table the SQL hits.
+        low = sql.lower()
+        if "from public.projects" in low:
             self._mode = "project"
-        elif "from public.points" in sql.lower() or "public.points" in sql:
+        elif "from public.clusters" in low:
+            self._mode = "clusters"
+        elif "from public.points" in low:
             self._mode = "points"
         else:
             self._mode = "?"
@@ -58,6 +67,8 @@ class _FakeCursor:
     def fetchall(self) -> list[tuple[Any, ...]]:
         if self._mode == "points":
             return self._points_rows
+        if self._mode == "clusters":
+            return self._cluster_rows
         return []
 
 
@@ -284,6 +295,207 @@ def test_empty_query_rejected(monkeypatch, auth_on) -> None:
     assert resp.status_code == 400
     assert called["embed"] is False
     assert called["connect"] is False
+
+
+def _points_row(
+    pid: str,
+    text: str,
+    cluster_id: int | None,
+    score: float = 0.1,
+) -> tuple[Any, ...]:
+    """Shape matches the SELECT in _search_points:
+    (id::text, text, x, y, z, cluster_id, score)."""
+    return (pid, text, 0.0, 0.0, 0.0, cluster_id, score)
+
+
+def test_region_summary_aggregates_by_cluster_with_real_labels(
+    monkeypatch, auth_on
+) -> None:
+    """Matches across three clusters with real labels → regions ranked by
+    count desc, summary names the dominant region(s) in plain language."""
+    monkeypatch.setattr(
+        search_module,
+        "embed_texts",
+        lambda texts, embed_model="x": np.zeros((len(texts), 384), dtype=np.float32),
+    )
+
+    # 6 hits in cluster 3 (Senate races), 3 in cluster 7 (campaign finance),
+    # 1 in cluster 11 (sports), plus 2 noise hits that must not pollute regions.
+    points_rows = [
+        *[_points_row(f"p{i}", "t", 3) for i in range(6)],
+        *[_points_row(f"p{i + 6}", "t", 7) for i in range(3)],
+        _points_row("p9", "t", 11),
+        _points_row("pn1", "t", None),
+        _points_row("pn2", "t", None),
+    ]
+    cluster_rows = [
+        (3, "Senate Races"),
+        (7, "Campaign Finance"),
+        (11, "Pro Sports"),
+    ]
+    cursor = _FakeCursor(
+        project_row=("all-MiniLM-L6-v2",),
+        points_rows=points_rows,
+        cluster_rows=cluster_rows,
+    )
+    monkeypatch.setattr(search_module, "connect", lambda: _fake_connect_ctx(cursor))
+
+    resp = _client().post(
+        "/search",
+        headers=_hdr(),
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "tenant_id": "22222222-2222-2222-2222-222222222222",
+            "query": "money in politics",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Regions aggregated and ordered correctly. Noise excluded.
+    assert body["labels_are_real"] is True
+    assert [r["cluster_id"] for r in body["regions"]] == [3, 7, 11]
+    assert [r["count"] for r in body["regions"]] == [6, 3, 1]
+    assert [r["label"] for r in body["regions"]] == [
+        "Senate Races",
+        "Campaign Finance",
+        "Pro Sports",
+    ]
+    # Summary is a plain-language sentence that names the regions. We don't
+    # pin exact prose (caller can tweak), but the label that dominates must
+    # appear in it.
+    assert "Senate Races" in body["summary"]
+    assert body["summary"] != ""
+
+    # The cluster lookup was scoped to the verified tenant — defense in depth.
+    cluster_calls = [c for c in cursor.calls if "public.clusters" in c[0]]
+    assert len(cluster_calls) == 1
+    sql, params = cluster_calls[0]
+    assert "tenant_id" in sql.lower()
+    assert "22222222-2222-2222-2222-222222222222" in params
+
+
+def test_region_summary_degrades_when_labels_are_placeholders(
+    monkeypatch, auth_on
+) -> None:
+    """If every matched cluster's label is a `Cluster N` placeholder, the
+    summary collapses to dot-highlight-only: regions still come back (the
+    UI can list them as bare cluster ids), but labels_are_real is False
+    and summary is empty so the client knows not to print prose."""
+    monkeypatch.setattr(
+        search_module,
+        "embed_texts",
+        lambda texts, embed_model="x": np.zeros((len(texts), 384), dtype=np.float32),
+    )
+
+    points_rows = [
+        *[_points_row(f"p{i}", "t", 3) for i in range(4)],
+        *[_points_row(f"p{i + 4}", "t", 7) for i in range(2)],
+    ]
+    # Both labels look like the pre-labels-commit placeholder shape.
+    cluster_rows = [(3, "Cluster 3"), (7, "Cluster 7")]
+    cursor = _FakeCursor(
+        project_row=("all-MiniLM-L6-v2",),
+        points_rows=points_rows,
+        cluster_rows=cluster_rows,
+    )
+    monkeypatch.setattr(search_module, "connect", lambda: _fake_connect_ctx(cursor))
+
+    resp = _client().post(
+        "/search",
+        headers=_hdr(),
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "tenant_id": "22222222-2222-2222-2222-222222222222",
+            "query": "anything",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # Aggregation still ran — the client can use it for dot-highlight bookkeeping.
+    assert [r["cluster_id"] for r in body["regions"]] == [3, 7]
+    assert [r["count"] for r in body["regions"]] == [4, 2]
+    # …but the legibility layer is suppressed.
+    assert body["labels_are_real"] is False
+    assert body["summary"] == ""
+
+
+def test_region_summary_handles_missing_and_blank_labels_as_placeholders(
+    monkeypatch, auth_on
+) -> None:
+    """A NULL label or whitespace-only label is just as un-nameable as a
+    `Cluster N` placeholder. labels_are_real must remain False unless at
+    least one matched cluster has a real, human-readable label."""
+    monkeypatch.setattr(
+        search_module,
+        "embed_texts",
+        lambda texts, embed_model="x": np.zeros((len(texts), 384), dtype=np.float32),
+    )
+
+    points_rows = [
+        _points_row("p0", "t", 1),
+        _points_row("p1", "t", 2),
+    ]
+    cluster_rows = [(1, None), (2, "   ")]
+    cursor = _FakeCursor(
+        project_row=("all-MiniLM-L6-v2",),
+        points_rows=points_rows,
+        cluster_rows=cluster_rows,
+    )
+    monkeypatch.setattr(search_module, "connect", lambda: _fake_connect_ctx(cursor))
+
+    resp = _client().post(
+        "/search",
+        headers=_hdr(),
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "tenant_id": "22222222-2222-2222-2222-222222222222",
+            "query": "anything",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["labels_are_real"] is False
+    assert body["summary"] == ""
+
+
+def test_region_summary_excludes_noise_matches(monkeypatch, auth_on) -> None:
+    """Matches with cluster_id NULL (HDBSCAN noise) are intentionally absent
+    from regions — they don't belong to any named place. With only noise
+    matches, regions is empty and the panel falls through to dot-only."""
+    monkeypatch.setattr(
+        search_module,
+        "embed_texts",
+        lambda texts, embed_model="x": np.zeros((len(texts), 384), dtype=np.float32),
+    )
+
+    points_rows = [_points_row(f"pn{i}", "t", None) for i in range(5)]
+    cursor = _FakeCursor(
+        project_row=("all-MiniLM-L6-v2",),
+        points_rows=points_rows,
+        cluster_rows=[],
+    )
+    monkeypatch.setattr(search_module, "connect", lambda: _fake_connect_ctx(cursor))
+
+    resp = _client().post(
+        "/search",
+        headers=_hdr(),
+        json={
+            "project_id": "11111111-1111-1111-1111-111111111111",
+            "tenant_id": "22222222-2222-2222-2222-222222222222",
+            "query": "anything",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["regions"] == []
+    assert body["labels_are_real"] is False
+    assert body["summary"] == ""
+    # The cluster-label lookup is skipped entirely when there are no
+    # clustered matches — no SQL on public.clusters.
+    cluster_calls = [c for c in cursor.calls if "public.clusters" in c[0]]
+    assert cluster_calls == []
 
 
 def test_search_requires_auth(monkeypatch) -> None:

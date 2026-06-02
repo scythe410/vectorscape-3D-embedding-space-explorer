@@ -253,6 +253,7 @@ export default function SandboxViewer({ projectId }: Props) {
           projectId={projectId}
           active={searchResult}
           onResult={onSearchResult}
+          onFlyToCluster={(cid) => handleRef.current?.flyTo(cid)}
         />
 
         <section className="flex max-h-[40%] flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950/40">
