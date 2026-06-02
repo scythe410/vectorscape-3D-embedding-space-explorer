@@ -12,6 +12,24 @@ export interface PointsData {
   probability?: Float32Array;
 }
 
+/** Camera position + look-at target in world space. */
+export interface ScenePose {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
+/** Options for a scripted flythrough. */
+export interface FlythroughOptions {
+  /**
+   * Hold the starting pose for this many ms before the first keyframe
+   * transition begins. Use when the Canvas is already mounted at the
+   * desired opening pose (via `initialPose`) and the cinematic wants a
+   * beat of stillness before the dive — instead of a fake teleport
+   * keyframe with `smoothTime: 0.001`.
+   */
+  initialHoldMs?: number;
+}
+
 /** A cluster centroid for fly-to + label overlay. */
 export interface ClusterCentroid {
   id: string | number;
@@ -54,7 +72,10 @@ export interface VectorScapeHandle {
     enableTransition?: boolean,
   ) => Promise<void>;
   /** Play a sequenced cinematic path. Resolves when finished or cancelled. */
-  playFlythrough: (keyframes: FlythroughKeyframe[]) => Promise<void>;
+  playFlythrough: (
+    keyframes: FlythroughKeyframe[],
+    options?: FlythroughOptions,
+  ) => Promise<void>;
   /** Cancel an in-flight flythrough so the user can take over. */
   cancelFlythrough: () => void;
 }

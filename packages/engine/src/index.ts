@@ -4,8 +4,10 @@ export type {
   ClusterCentroid,
   ClusterPickOptions,
   FlythroughKeyframe,
+  FlythroughOptions,
   PointsData,
   RenderStats,
+  ScenePose,
   VectorScapeHandle,
 } from "./types";
 export { voxelDownsample } from "./voxel/voxelDownsample";

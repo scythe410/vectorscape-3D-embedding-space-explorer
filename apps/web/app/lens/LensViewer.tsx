@@ -3,10 +3,11 @@
 import {
   VectorScape,
   type FlythroughKeyframe,
+  type ScenePose,
   type VectorScapeHandle,
 } from "engine";
-import { folder, Leva, useControls } from "leva";
-import { useEffect, useRef, useState } from "react";
+import { folder, LevaPanel, useControls, useCreateStore } from "leva";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   clusterColor,
@@ -17,19 +18,28 @@ import {
 const DEMO_URL = "/demo/skm-galaxy.json";
 
 /**
+ * Single source of truth for the cinematic's opening pose. The Canvas opens
+ * its camera here (via VectorScape `initialPose`) AND the flythrough holds
+ * here for `INTRO_HOLD_MS` before the first dive — so the user sees the
+ * galaxy from far for a beat with zero camera motion, no teleport jump, no
+ * default-pose flash.
+ */
+const INTRO_START_POSE: ScenePose = {
+  position: [0, 32, 130],
+  target: [0, 0, 0],
+};
+const INTRO_HOLD_MS = 600;
+
+/**
  * Hand-tuned cinematic path. The reducer normalizes coords so the longest
  * half-extent is COORD_SCALE=60, so anchor poses can be expressed in absolute
  * world units and still frame any baked galaxy sensibly.
  *
- * Reads as a distant approach → first dive → swing across → gentle pull back
- * to the user's home pose. Total ~15s.
- *
- * Start pose chosen so the galaxy is visible from frame 1: with fogDensity
- * 0.011, exp(-d² × z²) ≈ 0.17 at z=120 — dim distant nebula, not a black
- * screen. The previous z=240 sat at fog factor 0.001, which read as broken.
+ * Reads as: first dive in from the wide opening pose → swing across the
+ * galaxy → settle on the user's home pose. Total ~14.6s (plus INTRO_HOLD_MS
+ * of held-still opener).
  */
 const FLYTHROUGH: FlythroughKeyframe[] = [
-  { position: [0, 32, 130], target: [0, 0, 0], smoothTime: 0.001, holdMs: 600 },
   { position: [50, 22, 100], target: [0, 0, 0], smoothTime: 3.0, holdMs: 400 },
   { position: [85, -10, 65], target: [10, -5, 0], smoothTime: 3.2, holdMs: 500 },
   { position: [15, -50, 80], target: [-25, 5, 15], smoothTime: 3.4, holdMs: 500 },
@@ -41,18 +51,31 @@ export default function LensViewer() {
   const [loaded, setLoaded] = useState<LoadedProject | null>(null);
   const [fetchError, setFetchError] = useState<string | undefined>();
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
-  const [flythroughRunning, setFlythroughRunning] = useState(false);
+  // Seed to true so the cinematic chrome (right rail, tune button, nav hint)
+  // stays hidden from the very first paint of the loaded scene. Otherwise the
+  // ~150ms gap between "data loaded" and "intro fires" lets those panels
+  // render for one frame before the intro hides them — a visible flash.
+  const [flythroughRunning, setFlythroughRunning] = useState(true);
   const [hqMode, setHqMode] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [constellationsOpen, setConstellationsOpen] = useState(false);
   const handleRef = useRef<VectorScapeHandle | null>(null);
   const startedRef = useRef(false);
 
+  // Local Leva store. Routing useControls through this keeps Leva's global
+  // store empty, which prevents `useControls` from auto-injecting a default
+  // panel into document.body. That auto-inject fires inside a useEffect on
+  // first mount, briefly painting a panel before our `<Leva hidden />` effect
+  // tears it back down — the "tune box flash" symptom. With a local store,
+  // the auto-inject path is never taken.
+  const levaStore = useCreateStore();
+
   // Live tuning panel — same knobs the spike used, plus a couple extras for
   // the new HDR/bloom pipeline. Defaults match the spike's "good-looking
   // galaxy" preset (point size 2.2, fog 0.011, bloom 0.9 at threshold 0.35).
   // The panel itself is hidden until the side button flips controlsOpen.
-  const ctrl = useControls({
+  const ctrl = useControls(
+    {
     "point size": { value: 3.0, min: 0.5, max: 8, step: 0.1 },
     fog: { value: 0.0, min: 0, max: 0.02, step: 0.0005 },
     "architectural mode": true,
@@ -71,7 +94,9 @@ export default function LensViewer() {
       "depth of field": false,
       "min brightness": { value: 0.51, min: 0, max: 1, step: 0.01 },
     }),
-  });
+    },
+    { store: levaStore },
+  );
 
   // Architectural mode = points recede so labeled structure takes over (per
   // the spike). Multiply size by the spike's 0.4 fade. Divide by 3.0 because
@@ -95,19 +120,24 @@ export default function LensViewer() {
     };
   }, []);
 
-  // Kick the intro once the renderer mount is live. handleRef is set by R3F
-  // inside Canvas's first effect pass, so we wait one tick.
-  useEffect(() => {
-    if (!loaded || startedRef.current) return;
+  // VectorScape calls this once after its camera controls are wired and the
+  // initial pose is applied. Driving the cinematic from this callback (instead
+  // of a setTimeout race against Canvas mount) means there's no window where
+  // the camera sits at a default pose before the intro starts.
+  const handleRendererReady = useCallback(() => {
+    if (startedRef.current) return;
     startedRef.current = true;
-    const t = window.setTimeout(() => {
-      const h = handleRef.current;
-      if (!h) return;
-      setFlythroughRunning(true);
-      void h.playFlythrough(FLYTHROUGH).finally(() => setFlythroughRunning(false));
-    }, 150);
-    return () => window.clearTimeout(t);
-  }, [loaded]);
+    const h = handleRef.current;
+    if (!h) {
+      // Imperative handle never wired — reveal the chrome instead of leaving
+      // the user staring at a stripped UI forever.
+      setFlythroughRunning(false);
+      return;
+    }
+    void h
+      .playFlythrough(FLYTHROUGH, { initialHoldMs: INTRO_HOLD_MS })
+      .finally(() => setFlythroughRunning(false));
+  }, []);
 
   const skip = () => {
     handleRef.current?.cancelFlythrough();
@@ -126,9 +156,11 @@ export default function LensViewer() {
     );
   }
   if (!loaded) {
+    // Same copy + styling as LensClient's dynamic-import fallback so the JS
+    // chunk → JSON fetch handoff reads as one continuous splash, not two.
     return (
-      <div className="flex h-screen items-center justify-center bg-black text-sm text-neutral-400">
-        Loading galaxy…
+      <div className="flex h-screen w-screen items-center justify-center bg-black text-xs uppercase tracking-[0.2em] text-neutral-500">
+        Booting galaxy…
       </div>
     );
   }
@@ -141,6 +173,8 @@ export default function LensViewer() {
         clusters={loaded.centroids}
         showClusterLabels
         background="#000000"
+        initialPose={INTRO_START_POSE}
+        onReady={handleRendererReady}
         fogDensity={ctrl.fog}
         pointSizeScale={effectiveSizeScale}
         coreSharpness={ctrl["core sharpness"]}
@@ -160,32 +194,46 @@ export default function LensViewer() {
       />
 
       {/*
-        Leva live-tuning panel — hidden by default; the small button below
-        toggles it. Leva renders its own move/collapse/search header inside
-        the panel, so we don't need to provide those ourselves.
+        Live-tuning panel. We use LevaPanel (not <Leva />) bound to a local
+        store so that:
+          (a) Leva's global store stays empty, so useControls never triggers
+              the document.body auto-inject path — no first-frame paint of a
+              default panel.
+          (b) The panel renders inline (no portal), so a parent React
+              conditional cleanly gates whether any panel DOM exists at all.
+        The wrapping div carries the panel's fixed position so it sits where
+        the old `<Leva />` did. Drag is disabled since the wrapper owns
+        positioning; users open/close via the side button.
       */}
-      <Leva
-        hidden={!controlsOpen}
-        collapsed={false}
-        titleBar={{ title: "feel", filter: true, drag: true }}
-        theme={{
-          sizes: { rootWidth: "300px", controlWidth: "150px" },
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => setControlsOpen((v) => !v)}
-        className={
-          "absolute right-6 top-1/2 z-50 -translate-y-1/2 rounded-l-md border border-r-0 border-white/15 bg-black/50 px-2 py-3 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur-md transition " +
-          (controlsOpen
-            ? "border-amber-300/60 text-amber-200"
-            : "text-neutral-300 hover:border-white/30 hover:text-neutral-100")
-        }
-        title="Adjust feel — point size, fog, bloom"
-        style={{ writingMode: "vertical-rl" }}
-      >
-        {controlsOpen ? "close" : "tune feel"}
-      </button>
+      {controlsOpen && !flythroughRunning && (
+        <div className="absolute right-14 top-6 z-50 w-[300px]">
+          <LevaPanel
+            store={levaStore}
+            fill
+            flat
+            titleBar={{ title: "feel", filter: true, drag: false }}
+            theme={{
+              sizes: { rootWidth: "300px", controlWidth: "150px" },
+            }}
+          />
+        </div>
+      )}
+      {!flythroughRunning && (
+        <button
+          type="button"
+          onClick={() => setControlsOpen((v) => !v)}
+          className={
+            "absolute right-6 top-1/2 z-50 -translate-y-1/2 rounded-l-md border border-r-0 border-white/15 bg-black/50 px-2 py-3 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur-md transition " +
+            (controlsOpen
+              ? "border-amber-300/60 text-amber-200"
+              : "text-neutral-300 hover:border-white/30 hover:text-neutral-100")
+          }
+          title="Adjust feel — point size, fog, bloom"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          {controlsOpen ? "close" : "tune feel"}
+        </button>
+      )}
 
       {/* Top-left: title + meta. Translucent glass per design.md. */}
       <div className="pointer-events-none absolute left-6 top-6 max-w-xs rounded-lg border border-white/10 bg-black/40 px-4 py-3 backdrop-blur-md">
@@ -229,6 +277,15 @@ export default function LensViewer() {
           <div className="rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px] text-neutral-400 backdrop-blur-md">
             drag · scroll · click point · click cluster
           </div>
+          <a
+            href="/lens/dataset"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="pointer-events-auto rounded-full border border-white/10 bg-black/40 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-neutral-300 backdrop-blur-md transition hover:border-amber-300/60 hover:text-amber-200"
+            title="Browse the source dataset the galaxy was built from"
+          >
+            dataset ↗
+          </a>
           <button
             type="button"
             onClick={() => setHqMode((v) => !v)}
@@ -286,7 +343,7 @@ export default function LensViewer() {
               </button>
             </header>
             {constellationsOpen && (
-            <ul className="flex-1 overflow-y-auto text-sm">
+            <ul className="scrollbar-subtle flex-1 overflow-y-auto text-sm">
               <li>
                 <button
                   type="button"
@@ -331,7 +388,7 @@ export default function LensViewer() {
             <header className="border-b border-white/5 px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-neutral-400">
               Selection
             </header>
-            <div className="flex-1 overflow-y-auto px-3 py-2 text-sm">
+            <div className="scrollbar-subtle flex-1 overflow-y-auto px-3 py-2 text-sm">
               {pickedPoint ? (
                 <div className="space-y-2">
                   <div className="font-mono text-[10px] text-neutral-500">

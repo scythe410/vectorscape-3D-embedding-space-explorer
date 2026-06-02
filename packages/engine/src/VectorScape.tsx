@@ -25,6 +25,7 @@ import type {
   ClusterPickOptions,
   PointsData,
   RenderStats,
+  ScenePose,
   VectorScapeHandle,
 } from "./types";
 import { voxelDownsample } from "./voxel/voxelDownsample";
@@ -93,9 +94,28 @@ export interface VectorScapeProps {
   pickPixelRadius?: number;
   /** Reports total/kept counts after the voxel pass. */
   onStats?: (stats: RenderStats) => void;
+  /**
+   * Camera + target on first paint. The Canvas opens its camera at this
+   * position and CameraControls' internal target is synced to match before
+   * any user input or scripted move. Use this to avoid a "default-pose
+   * flash" when the host plans to immediately drive the camera (e.g., a
+   * cinematic intro). Default position [0, 0, 60] looking at the origin.
+   */
+  initialPose?: ScenePose;
+  /**
+   * Fires once after the renderer mounts and `initialPose` has been
+   * applied to the controls. Hosts use this to kick scripted camera
+   * moves without racing the Canvas mount via setTimeout.
+   */
+  onReady?: () => void;
   className?: string;
   style?: React.CSSProperties;
 }
+
+const DEFAULT_INITIAL_POSE: ScenePose = {
+  position: [0, 0, 60],
+  target: [0, 0, 0],
+};
 
 const DEFAULT_BUDGET = 350_000;
 const BLOOM_LAYER = 1;
@@ -145,6 +165,8 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       onPointPick,
       pickPixelRadius,
       onStats,
+      initialPose = DEFAULT_INITIAL_POSE,
+      onReady,
       className,
       style,
     },
@@ -182,7 +204,7 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             // (WebGPURenderer is intentionally not imported.)
           }}
           dpr={[1, 2]}
-          camera={{ position: [0, 0, 60], fov: 50, near: 0.1, far: 2000 }}
+          camera={{ position: initialPose.position, fov: 50, near: 0.1, far: 2000 }}
           // Selective bloom by layer. Anything on BLOOM_LAYER glows; the
           // invisible fly-to spheres don't.
           onCreated={({ camera }) => {
@@ -210,6 +232,8 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             onClusterSelect={onClusterSelect}
             handleRef={handleRef}
             enableAmbientDrift={enableAmbientDrift}
+            initialPose={initialPose}
+            onReady={onReady}
           />
 
           {showClusterLabels && clusters.length > 0 && (
@@ -279,11 +303,15 @@ function SceneController({
   onClusterSelect,
   handleRef,
   enableAmbientDrift,
+  initialPose,
+  onReady,
 }: {
   clusters: ClusterCentroid[];
   onClusterSelect?: (id: ClusterCentroid["id"], opts: ClusterPickOptions) => void;
   handleRef: React.ForwardedRef<VectorScapeHandle>;
   enableAmbientDrift: boolean;
+  initialPose: ScenePose;
+  onReady?: () => void;
 }) {
   const controlsRef = useRef<CameraControls>(null);
   const targetsRef = useRef<FlyToTargetsHandle>(null);
@@ -292,6 +320,44 @@ function SceneController({
   // when they see a stale id. Cleaner than threading AbortControllers through
   // a Promise chain.
   const flythroughGenRef = useRef(0);
+  // Capture onReady in a ref so the mount effect's empty-deps closure never
+  // calls a stale callback if the host re-renders with a new function.
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+
+  // Sync controls' internal target to initialPose and signal readiness exactly
+  // once on first mount. The Canvas already opened its camera at
+  // initialPose.position; this aligns the controls so the next user input or
+  // playFlythrough call doesn't snap from a stale [0,0,0] default target.
+  useEffect(() => {
+    let cancelled = false;
+    const apply = () => {
+      const controls = controlsRef.current;
+      if (!controls) {
+        // CameraControls ref hasn't committed yet — try again next frame.
+        if (!cancelled) requestAnimationFrame(apply);
+        return;
+      }
+      void controls.setLookAt(
+        initialPose.position[0],
+        initialPose.position[1],
+        initialPose.position[2],
+        initialPose.target[0],
+        initialPose.target[1],
+        initialPose.target[2],
+        false,
+      );
+      onReadyRef.current?.();
+    };
+    apply();
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally fire-once: initialPose is the *opening* pose, not a
+    // controlled value. Hosts who want to move the camera later use the
+    // imperative handle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useImperativeHandle(
     handleRef,
@@ -358,12 +424,16 @@ function SceneController({
           enableTransition,
         );
       },
-      playFlythrough: async (keyframes) => {
+      playFlythrough: async (keyframes, options) => {
         const controls = controlsRef.current;
         if (!controls || keyframes.length === 0) return;
         const myGen = ++flythroughGenRef.current;
         const defaultSmooth = controls.smoothTime;
         try {
+          if (options?.initialHoldMs && options.initialHoldMs > 0) {
+            await new Promise((r) => setTimeout(r, options.initialHoldMs));
+            if (flythroughGenRef.current !== myGen) return;
+          }
           for (const kf of keyframes) {
             if (flythroughGenRef.current !== myGen) return;
             if (kf.smoothTime != null) controls.smoothTime = kf.smoothTime;
