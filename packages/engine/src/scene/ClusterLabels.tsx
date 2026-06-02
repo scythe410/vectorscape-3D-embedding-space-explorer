@@ -111,13 +111,21 @@ export function ClusterLabels({
               fontFamily:
                 "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
               whiteSpace: "nowrap",
+              // Free c-TF-IDF caps at ~24 chars and LLM caps at 4 words, but
+              // pre-0a labels in the DB (e.g. full newsgroup taxonomies) can
+              // be longer. Truncate with ellipsis so the pill stays compact.
+              maxWidth: "180px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
               // Soft shadow so labels stay legible over bright nebula cores.
               textShadow: "0 1px 2px rgba(0,0,0,0.85)",
               boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
               userSelect: "none",
             }}
           >
-            {c.label ?? `Cluster ${c.id}`}
+            <span title={c.label ?? `Cluster ${c.id}`}>
+              {c.label ?? `Cluster ${c.id}`}
+            </span>
           </div>
         </Html>
       ))}

@@ -221,6 +221,7 @@ export default function SandboxViewer({ projectId }: Props) {
           minBrightness={searchOverride ? SEARCH_MIN_BRIGHTNESS : undefined}
           onClusterSelect={onClusterPick}
           onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
+          showClusterLabels
         />
         <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/50 px-2 py-1 text-xs text-neutral-300 backdrop-blur">
           {loaded.project.name} · {loaded.totalPoints.toLocaleString()} points ·{" "}
