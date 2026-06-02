@@ -10,6 +10,7 @@ import numpy as np
 
 from .config import COORD_SCALE, DEFAULT_EMBED_MODEL, DEFAULT_REDUCER, PCA_THRESHOLD
 from .embeddings import embed_texts
+from .labeling import label_clusters
 
 
 @dataclass
@@ -108,21 +109,29 @@ def _normalize_coords(coords: np.ndarray, scale: float = COORD_SCALE) -> np.ndar
 
 def _build_cluster_rows(
     coords: np.ndarray, cluster_ids: np.ndarray, texts: list[str]
-) -> list[ClusterRow]:
+) -> tuple[list[ClusterRow], dict[int, list[str]]]:
+    """Return (cluster_rows_with_placeholder_labels, medoid_snippets_by_cluster).
+
+    Snippets are the medoid plus up to two next-nearest-to-centroid items —
+    feed for the optional LLM labeling pass.
+    """
     rows: list[ClusterRow] = []
+    snippets: dict[int, list[str]] = {}
     unique = sorted(int(c) for c in np.unique(cluster_ids) if int(c) != -1)
     for cid in unique:
         mask = cluster_ids == cid
         members = coords[mask]
         centroid = members.mean(axis=0)
         dists = np.linalg.norm(members - centroid, axis=1)
-        local_medoid = int(np.argmin(dists))
+        order = np.argsort(dists)
         global_indices = np.flatnonzero(mask)
-        medoid_idx = int(global_indices[local_medoid])
+        sel = [int(global_indices[order[i]]) for i in range(min(3, len(order)))]
+        medoid_idx = sel[0]
+        snippets[cid] = [texts[i] for i in sel]
         rows.append(
             ClusterRow(
                 cluster_id=cid,
-                label=f"Cluster {cid}",  # placeholder; LLM-labeled later.
+                label=f"Cluster {cid}",  # placeholder; replaced by label_clusters.
                 cx=float(centroid[0]),
                 cy=float(centroid[1]),
                 cz=float(centroid[2]),
@@ -130,7 +139,7 @@ def _build_cluster_rows(
                 size=int(mask.sum()),
             )
         )
-    return rows
+    return rows, snippets
 
 
 def run_pipeline(
@@ -155,7 +164,12 @@ def run_pipeline(
         min_cluster_size=min_cluster_size,
         selection_method=cluster_selection_method,
     )
-    clusters = _build_cluster_rows(coords, cluster_ids, texts)
+    clusters, medoid_snippets = _build_cluster_rows(coords, cluster_ids, texts)
+    labels = label_clusters(
+        texts, cluster_ids, medoid_snippets_by_cluster=medoid_snippets
+    )
+    for row in clusters:
+        row.label = labels.get(row.cluster_id, row.label)
 
     return PipelineResult(
         embeddings=embeddings,

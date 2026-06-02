@@ -23,6 +23,8 @@ from pydantic import BaseModel
 from .auth import verify_reducer_secret
 from .config import GEMINI_API_KEY, OPENAI_API_KEY
 from .db import connect
+from .text_fence import fenced as _fenced
+from .text_fence import sanitize as _sanitize  # noqa: F401 — re-exported for tests
 
 router = APIRouter()
 
@@ -166,31 +168,6 @@ def _fetch_boundary(
         }
         for r in rows
     ]
-
-
-# Control-character stripper — keep \t, \n, \r; drop the rest of C0 + DEL.
-# Stops null bytes, ESC sequences, etc. from sneaking into the prompt.
-_CONTROL_CHARS = "".join(
-    chr(c) for c in list(range(0x00, 0x09)) + [0x0B, 0x0C] + list(range(0x0E, 0x20)) + [0x7F]
-)
-_CONTROL_TRANSLATE = str.maketrans("", "", _CONTROL_CHARS)
-
-
-def _sanitize(s: str | None) -> str:
-    """Strip control chars and the closing tag so it can't end the fence early."""
-    if not s:
-        return ""
-    s = s.translate(_CONTROL_TRANSLATE)
-    # Defang the closing tag; the LLM should never see a real </user_text>
-    # inside the user data. Case-insensitive to be safe.
-    return s.replace("</user_text>", "<!-- /user_text -->").replace(
-        "</USER_TEXT>", "<!-- /USER_TEXT -->"
-    )
-
-
-def _fenced(text: str | None, cap: int) -> str:
-    """Wrap user text in an explicit data fence so the LLM treats it as inert."""
-    return f"<user_text>\n{_sanitize(_truncate(text, cap))}\n</user_text>"
 
 
 def _build_prompt(a: dict, boundary_a: list[dict], b: dict, boundary_b: list[dict]) -> str:

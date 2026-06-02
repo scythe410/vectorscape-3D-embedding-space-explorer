@@ -141,7 +141,11 @@ def bake_static(
     if labels is not None:
         from collections import Counter
         for c in result.clusters:
-            members = [labels[i] for i in range(len(texts)) if int(result.cluster_ids[i]) == c.cluster_id]
+            members = [
+                labels[i]
+                for i in range(len(texts))
+                if int(result.cluster_ids[i]) == c.cluster_id
+            ]
             if members:
                 top, _ = Counter(members).most_common(1)[0]
                 cluster_label_hints[c.cluster_id] = top
