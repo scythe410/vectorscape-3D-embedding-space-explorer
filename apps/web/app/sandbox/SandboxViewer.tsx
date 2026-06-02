@@ -14,10 +14,22 @@ interface Props {
 // At most two clusters can be in the Bridge selection at once.
 const MAX_SELECTION = 2;
 
-// Probability values driving the shader brightness/alpha during search.
-// Matched points stay fully lit; everyone else dims into the background fog.
+// Probability values driving the shader alpha during search. Matched points
+// stay fully lit; misses drop to dust. Modulating alpha alone is not enough —
+// loadProject bakes HDR (>1.0) into cluster cores so bloom can bite, and bloom
+// keys off framebuffer luminance after additive blending. The color buffer
+// gets dimmed too (see SEARCH_MISS_COLOR_SCALE) so unmatched cluster cores
+// stop contributing to bloom even when they overlap heavily.
 const SEARCH_HIT_PROB = 1.0;
-const SEARCH_MISS_PROB = 0.04;
+const SEARCH_MISS_PROB = 0.15;
+// Color multiplier on unmatched points while search is active. Kept low
+// enough that even dense additive overlap stays under the bloom threshold,
+// but high enough that the dust is still visible against the background.
+const SEARCH_MISS_COLOR_SCALE = 0.16;
+// Alpha floor passed to the engine while search is active. The default 0.51
+// in VectorScape props is too high to let misses visibly dim; with the floor
+// at 0 the dim actually reaches the framebuffer.
+const SEARCH_MIN_BRIGHTNESS = 0;
 
 export default function SandboxViewer({ projectId }: Props) {
   const [loaded, setLoaded] = useState<LoadedProject | null>(null);
@@ -52,35 +64,57 @@ export default function SandboxViewer({ projectId }: Props) {
   }, [projectId]);
 
   /**
-   * Search-aware points data. When search is active, override the probability
-   * channel so matched points stay bright and the rest fade — using the
-   * existing per-point probability the shader already consumes for
-   * brightness/alpha. No new uniforms, no per-frame CPU work; rebuilds the
-   * GPU attribute once per search.
+   * Search-aware points data. When search is active we rebuild *both* the
+   * color and probability buffers:
+   *   - probability drops to dust for misses (governs shader alpha)
+   *   - color is scaled down on misses (kills HDR bloom contribution; the
+   *     baked-in `bcore` factor would otherwise keep cluster cores glowing
+   *     through bloom regardless of alpha)
+   * Matches keep their original color + full probability. One pass over the
+   * dataset, single GPU attribute upload per search.
    */
-  const displayPointsData: PointsData | null = useMemo(() => {
+  const searchOverride = useMemo(() => {
     if (!loaded) return null;
-    if (!searchResult || searchResult.matches.length === 0) {
-      return loaded.pointsData;
-    }
-    const matchIndices = new Set<number>();
+    if (!searchResult || searchResult.matches.length === 0) return null;
+    const matchIndices: number[] = [];
+    const matchSet = new Set<number>();
     for (const m of searchResult.matches) {
       const idx = loaded.indexById(m.id);
-      if (idx != null) matchIndices.add(idx);
+      if (idx != null && !matchSet.has(idx)) {
+        matchSet.add(idx);
+        matchIndices.push(idx);
+      }
     }
-    if (matchIndices.size === 0) return loaded.pointsData;
+    if (matchIndices.length === 0) return null;
     const n = loaded.totalPoints;
     const probability = new Float32Array(n);
+    const color = new Float32Array(n * 3);
+    const srcColor = loaded.pointsData.color;
     for (let i = 0; i < n; i++) {
-      probability[i] = matchIndices.has(i) ? SEARCH_HIT_PROB : SEARCH_MISS_PROB;
+      const hit = matchSet.has(i);
+      probability[i] = hit ? SEARCH_HIT_PROB : SEARCH_MISS_PROB;
+      const s = hit ? 1.0 : SEARCH_MISS_COLOR_SCALE;
+      color[i * 3] = srcColor[i * 3] * s;
+      color[i * 3 + 1] = srcColor[i * 3 + 1] * s;
+      color[i * 3 + 2] = srcColor[i * 3 + 2] * s;
     }
     return {
-      position: loaded.pointsData.position,
-      color: loaded.pointsData.color,
-      size: loaded.pointsData.size,
       probability,
+      color,
+      mustKeep: Uint32Array.from(matchIndices),
     };
   }, [loaded, searchResult]);
+
+  const displayPointsData: PointsData | null = useMemo(() => {
+    if (!loaded) return null;
+    if (!searchOverride) return loaded.pointsData;
+    return {
+      position: loaded.pointsData.position,
+      color: searchOverride.color,
+      size: loaded.pointsData.size,
+      probability: searchOverride.probability,
+    };
+  }, [loaded, searchOverride]);
 
   // When search results land, fly to the strongest cluster of results — the
   // cluster_id with the most matches. Falls back to the geometric mean of the
@@ -183,6 +217,8 @@ export default function SandboxViewer({ projectId }: Props) {
           points={displayPointsData ?? loaded.pointsData}
           clusters={loaded.centroids}
           enableDOF={hqMode}
+          mustKeepIndices={searchOverride?.mustKeep ?? null}
+          minBrightness={searchOverride ? SEARCH_MIN_BRIGHTNESS : undefined}
           onClusterSelect={onClusterPick}
           onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
         />

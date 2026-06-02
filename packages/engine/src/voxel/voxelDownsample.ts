@@ -30,6 +30,13 @@ export function voxelDownsample(
   positions: Float32Array,
   budget: number,
   fillRatio = DEFAULT_FILL_RATIO,
+  /**
+   * Indices that must appear in the kept set regardless of voxel occupancy —
+   * used so search matches don't get filtered out when the dataset exceeds
+   * budget. The match overrides whichever point would otherwise have won its
+   * cell, and any cell with no match keeps the first arrival as usual.
+   */
+  mustKeep?: Uint32Array | null,
 ): VoxelDownsampleResult {
   const n = positions.length / 3;
 
@@ -99,6 +106,27 @@ export function voxelDownsample(
       // Cap growth per attempt to avoid pathological jumps from tiny fills.
       cellsPerAxis = Math.min(next, Math.floor(cellsPerAxis * 1.8));
       continue;
+    }
+
+    if (mustKeep && mustKeep.length > 0) {
+      // Overwrite each must-keep point's cell with itself so it becomes the
+      // cell's representative. If several must-keeps share a cell, the union
+      // step below adds the overflow back.
+      for (let k = 0; k < mustKeep.length; k++) {
+        const m = mustKeep[k];
+        const ix = Math.min(stride - 1, Math.floor((positions[m * 3] - minX) * sx));
+        const iy = Math.min(stride - 1, Math.floor((positions[m * 3 + 1] - minY) * sy));
+        const iz = Math.min(stride - 1, Math.floor((positions[m * 3 + 2] - minZ) * sz));
+        const key = ix + iy * stride + iz * stride2;
+        occupied.set(key, m);
+      }
+      const seen = new Set<number>();
+      for (const idx of occupied.values()) seen.add(idx);
+      for (let k = 0; k < mustKeep.length; k++) seen.add(mustKeep[k]);
+      const kept = new Uint32Array(seen.size);
+      let w = 0;
+      for (const idx of seen) kept[w++] = idx;
+      return { kept, downsampled: true, cellsPerAxis };
     }
 
     const kept = new Uint32Array(occupied.size);

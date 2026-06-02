@@ -92,6 +92,12 @@ export interface VectorScapeProps {
   onPointPick?: (index: number) => void;
   /** Click radius in screen pixels for point picking. Default 16. */
   pickPixelRadius?: number;
+  /**
+   * Indices that must survive the voxel filter. Search highlighting uses this
+   * so matched points are guaranteed to render even on >budget datasets where
+   * the cell representative would otherwise be a different point.
+   */
+  mustKeepIndices?: Uint32Array | null;
   /** Reports total/kept counts after the voxel pass. */
   onStats?: (stats: RenderStats) => void;
   /**
@@ -164,6 +170,7 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       onClusterSelect,
       onPointPick,
       pickPixelRadius,
+      mustKeepIndices,
       onStats,
       initialPose = DEFAULT_INITIAL_POSE,
       onReady,
@@ -180,8 +187,8 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
     // because it's O(N) and synchronous; for very large datasets the host can
     // memoize `points` upstream.
     const downsample = useMemo(
-      () => voxelDownsample(points.position, budget),
-      [points, budget],
+      () => voxelDownsample(points.position, budget, undefined, mustKeepIndices),
+      [points, budget, mustKeepIndices],
     );
 
     useEffect(() => {
