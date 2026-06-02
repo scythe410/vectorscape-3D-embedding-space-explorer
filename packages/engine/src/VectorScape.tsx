@@ -472,12 +472,17 @@ function SceneController({
   return (
     <>
       {/*
-        Motion feel per design.md "Motion (the heart of it)":
-          - smoothTime 0.65 → fly-to decelerates into target like a craft.
+        Motion feel per design.md "Motion (the heart of it)" — split-smoothTime
+        model (do not collapse to a single steady-state value):
+          - smoothTime DEFAULT_SMOOTHTIME (0.3) → snappy steady-state / wheel
+            dolly. A higher steady-state (e.g. 0.65) lets trackpad two-finger
+            scroll dolly drift after the gesture stops and lock at min/max;
+            0.3 is the fix. Fly-to bumps to CINEMATIC_SMOOTHTIME (0.65) for
+            the cinematic arrival, then restores via .finally().
           - draggingSmoothTime 0.14 → drag stays responsive but the release
             coasts and settles instead of stopping dead.
-          - dollySpeed 0.7 → wheel zoom is calm, not twitchy.
-          - infinityDolly false (default) keeps the world bounded.
+          - dollySpeed 0.5 → wheel zoom is calm, not twitchy (trackpad-safe).
+          - minDistance/maxDistance bound the world; infinityDolly stays off.
       */}
       <CameraControls
         ref={controlsRef}
