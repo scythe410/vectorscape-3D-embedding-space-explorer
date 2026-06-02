@@ -269,9 +269,31 @@ export default function SandboxUI() {
               <button
                 type="submit"
                 disabled={submitting || !textColumn}
-                className="self-end rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-50"
+                aria-busy={submitting}
+                className="self-end rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 hover:bg-white disabled:opacity-60"
               >
-                {submitting ? "Uploading…" : "Embed + reduce"}
+                {submitting ? (
+                  <span
+                    className="inline-flex items-end gap-1 py-1"
+                    role="status"
+                    aria-label="Uploading"
+                  >
+                    <span
+                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full bg-current"
+                      style={{ animationDelay: "0ms" }}
+                    />
+                    <span
+                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full bg-current"
+                      style={{ animationDelay: "120ms" }}
+                    />
+                    <span
+                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full bg-current"
+                      style={{ animationDelay: "240ms" }}
+                    />
+                  </span>
+                ) : (
+                  "Embed + reduce"
+                )}
               </button>
               {submitError && (
                 <div className="sm:col-span-3 rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-200">
