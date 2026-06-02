@@ -99,6 +99,16 @@ export interface VectorScapeProps {
 
 const DEFAULT_BUDGET = 350_000;
 const BLOOM_LAYER = 1;
+// Steady-state smoothing for user input (drag, wheel). Low enough that Mac
+// trackpad wheel events don't leave a half-second tail of phantom dolly after
+// the user stops scrolling. Drag has its own draggingSmoothTime override.
+const DEFAULT_SMOOTHTIME = 0.3;
+// Cinematic smoothing used during fly-to / flyToPoint only.
+const CINEMATIC_SMOOTHTIME = 0.65;
+// Bounds on the camera's distance from target. Without these, repeated wheel
+// events on a Mac trackpad can run dolly to ~0 (stuck) or out past the fog.
+const MIN_DOLLY_DISTANCE = 2;
+const MAX_DOLLY_DISTANCE = 600;
 
 /**
  * Top-level renderer. Owns the Canvas, fog, postprocessing, camera, and
@@ -291,21 +301,38 @@ function SceneController({
         const mesh = targetsRef.current?.getMesh(id);
         const controls = controlsRef.current;
         if (!mesh || !controls) return;
-        // fitToSphere frames the sphere with margin; the boolean enables the
-        // smooth transition CameraControls uses by default.
-        void controls.fitToSphere(mesh, true);
+        // Mac trackpads keep emitting wheel events with tiny deltas; without
+        // stop() those queued dolly targets pre-empt fitToSphere within a
+        // frame and the click reads as "nothing happened."
+        controls.stop();
+        // Invisible meshes still get matrices updated each render, but when
+        // fitToSphere fires between frames the world matrix can be a tick
+        // stale; force a refresh so the bounds are correct.
+        mesh.updateMatrixWorld(true);
+        // Cinematic smoothing just for the fly-to. The steady-state
+        // smoothTime is lower so wheel-driven dolly snaps instead of drifting.
+        const prevSmooth = controls.smoothTime;
+        controls.smoothTime = CINEMATIC_SMOOTHTIME;
+        void controls.fitToSphere(mesh, true).finally(() => {
+          controls.smoothTime = prevSmooth;
+        });
       },
       flyToPoint: (position, radius = 3) => {
         flythroughGenRef.current++;
         const controls = controlsRef.current;
         if (!controls) return;
+        controls.stop();
         // Frame an ephemeral sphere around the point — same code path as
         // cluster fly-to but for an arbitrary world coord (Bridge cites).
         const sphere = new THREE.Sphere(
           new THREE.Vector3(position[0], position[1], position[2]),
           radius,
         );
-        void controls.fitToSphere(sphere, true);
+        const prevSmooth = controls.smoothTime;
+        controls.smoothTime = CINEMATIC_SMOOTHTIME;
+        void controls.fitToSphere(sphere, true).finally(() => {
+          controls.smoothTime = prevSmooth;
+        });
       },
       resetView: () => {
         flythroughGenRef.current++;
@@ -372,12 +399,14 @@ function SceneController({
       <CameraControls
         ref={controlsRef}
         makeDefault
-        smoothTime={0.65}
+        smoothTime={DEFAULT_SMOOTHTIME}
         draggingSmoothTime={0.14}
-        dollySpeed={0.7}
+        dollySpeed={0.5}
         truckSpeed={2.2}
         azimuthRotateSpeed={0.8}
         polarRotateSpeed={0.8}
+        minDistance={MIN_DOLLY_DISTANCE}
+        maxDistance={MAX_DOLLY_DISTANCE}
       />
       {enableAmbientDrift && <AmbientDrift controlsRef={controlsRef} />}
       <FlyToTargets ref={targetsRef} clusters={clusters} onPick={onClusterSelect} />
