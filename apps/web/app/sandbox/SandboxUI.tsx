@@ -71,16 +71,41 @@ export default function SandboxUI() {
     if (guessedColumn && !textColumn) setTextColumn(guessedColumn);
   }, [guessedColumn, textColumn]);
 
-  // Poll the status endpoint while the project is in flight.
+  // Poll the status endpoint while the project is in flight. We tolerate a
+  // short run of transient failures (reducer cold start, brief network blip)
+  // before declaring the job dead — a single bad poll used to latch the UI
+  // into a permanent synthetic error, which was the bug behind the 502 report.
+  const MAX_TRANSIENT_FAILURES = 5;
   useEffect(() => {
     if (!projectId) return;
     if (status?.status === "ready" || status?.status === "error") return;
 
     let cancelled = false;
+    let failures = 0;
     const tick = async () => {
       try {
         const r = await fetch(`/api/projects/${projectId}/status`, { cache: "no-store" });
+        // 503 with `transient: true` means the server hit a flaky reducer but
+        // the DB row is still in-flight — keep the last good status visible,
+        // bump the failure counter, and retry on the next tick.
+        if (r.status === 503) {
+          failures += 1;
+          if (failures < MAX_TRANSIENT_FAILURES) return;
+          if (!cancelled) {
+            setStatus({
+              project_id: projectId,
+              status: "error",
+              point_count: 0,
+              error_message:
+                "Reducer service is unreachable. The job may still finish on its own — try refreshing in a minute.",
+              progress: null,
+            });
+          }
+          return;
+        }
         if (!r.ok) {
+          failures += 1;
+          if (failures < MAX_TRANSIENT_FAILURES) return;
           if (!cancelled) {
             setStatus({
               project_id: projectId,
@@ -93,8 +118,11 @@ export default function SandboxUI() {
           return;
         }
         const body = (await r.json()) as StatusBody;
+        failures = 0;
         if (!cancelled) setStatus(body);
       } catch (e) {
+        failures += 1;
+        if (failures < MAX_TRANSIENT_FAILURES) return;
         if (!cancelled) {
           setStatus({
             project_id: projectId,
@@ -113,6 +141,20 @@ export default function SandboxUI() {
       clearInterval(id);
     };
   }, [projectId, status?.status]);
+
+  // Manual retry from the error panel: clears the synthetic error so the
+  // polling effect re-fires. The DB row is the source of truth, so if the
+  // job actually finished while we were offline, the next poll picks it up.
+  function retryStatus() {
+    if (!projectId) return;
+    setStatus({
+      project_id: projectId,
+      status: "reducing",
+      point_count: 0,
+      error_message: null,
+      progress: null,
+    });
+  }
 
   async function handleFile(file: File) {
     setParseError(undefined);
@@ -306,7 +348,7 @@ export default function SandboxUI() {
       )}
 
       {projectId && status && status.status !== "ready" && (
-        <StatusPanel status={status} onReset={resetAll} />
+        <StatusPanel status={status} onReset={resetAll} onRetry={retryStatus} />
       )}
 
       {projectId && status?.status === "ready" && (
@@ -436,7 +478,15 @@ function PreviewTable({
   );
 }
 
-function StatusPanel({ status, onReset }: { status: StatusBody; onReset: () => void }) {
+function StatusPanel({
+  status,
+  onReset,
+  onRetry,
+}: {
+  status: StatusBody;
+  onReset: () => void;
+  onRetry: () => void;
+}) {
   const isTerminal = status.status === "ready" || status.status === "error";
   const pct = status.progress?.pct ?? (status.status === "ready" ? 100 : 0);
   const stage = status.progress?.stage ?? status.status;
@@ -482,7 +532,16 @@ function StatusPanel({ status, onReset }: { status: StatusBody; onReset: () => v
       )}
 
       {isTerminal && (
-        <div>
+        <div className="flex items-center gap-4">
+          {status.status === "error" && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="text-xs text-neutral-300 underline hover:text-neutral-100"
+            >
+              Try again
+            </button>
+          )}
           <button
             type="button"
             onClick={onReset}

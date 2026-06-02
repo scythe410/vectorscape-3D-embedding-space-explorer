@@ -16,10 +16,13 @@ export async function GET(
   }
 
   // Tenant check via RLS: if the project doesn't belong to the user's tenant,
-  // this select returns no row and we 404 rather than leak existence.
+  // this select returns no row and we 404 rather than leak existence. We also
+  // grab status fields so we can fall back to the DB when the reducer service
+  // is temporarily unreachable — terminal states (ready/error) are persisted
+  // there, so a flaky reducer shouldn't hide a finished job from the UI.
   const { data: project, error } = await supabase
     .from("projects")
-    .select("id")
+    .select("id, status, point_count, error_message")
     .eq("id", id)
     .maybeSingle();
   if (error) {
@@ -28,6 +31,14 @@ export async function GET(
   if (!project) {
     return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
+
+  const dbFallback = () => ({
+    project_id: id,
+    status: project.status,
+    point_count: project.point_count ?? 0,
+    error_message: project.error_message ?? null,
+    progress: null,
+  });
 
   let reducerResp: Response;
   try {
@@ -39,16 +50,29 @@ export async function GET(
     if (e instanceof ReducerConfigError) {
       return NextResponse.json({ error: e.message }, { status: 500 });
     }
+    // Reducer unreachable. If the DB already shows a terminal state, that's
+    // the truth — return it 200. Otherwise mark the response transient so the
+    // client retries instead of latching to a synthetic error.
+    if (project.status === "ready" || project.status === "error") {
+      return NextResponse.json(dbFallback());
+    }
     return NextResponse.json(
-      { error: "reducer unreachable" },
-      { status: 502 },
+      { ...dbFallback(), transient: true, error: "reducer unreachable" },
+      { status: 503 },
     );
   }
   if (!reducerResp.ok) {
     const detail = await reducerResp.text().catch(() => "");
+    if (project.status === "ready" || project.status === "error") {
+      return NextResponse.json(dbFallback());
+    }
     return NextResponse.json(
-      { error: `reducer status fetch failed: ${detail.slice(0, 200)}` },
-      { status: 502 },
+      {
+        ...dbFallback(),
+        transient: true,
+        error: `reducer status fetch failed: ${detail.slice(0, 200)}`,
+      },
+      { status: 503 },
     );
   }
   const body = await reducerResp.json();
