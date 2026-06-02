@@ -274,21 +274,21 @@ export default function SandboxUI() {
               >
                 {submitting ? (
                   <span
-                    className="inline-flex items-end gap-1 py-1"
+                    className="inline-flex items-center gap-1.5 py-1"
                     role="status"
                     aria-label="Uploading"
                   >
                     <span
-                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full bg-current"
+                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full"
                       style={{ animationDelay: "0ms" }}
                     />
                     <span
-                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full bg-current"
-                      style={{ animationDelay: "120ms" }}
+                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full"
+                      style={{ animationDelay: "280ms" }}
                     />
                     <span
-                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full bg-current"
-                      style={{ animationDelay: "240ms" }}
+                      className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full"
+                      style={{ animationDelay: "560ms" }}
                     />
                   </span>
                 ) : (
