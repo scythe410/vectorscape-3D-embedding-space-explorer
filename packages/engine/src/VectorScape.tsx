@@ -298,22 +298,28 @@ function SceneController({
     () => ({
       flyTo: (id) => {
         flythroughGenRef.current++;
-        const mesh = targetsRef.current?.getMesh(id);
         const controls = controlsRef.current;
-        if (!mesh || !controls) return;
+        if (!controls) return;
+        // Drive framing from the cluster data directly instead of the invisible
+        // FlyToTargets mesh. The mesh path depended on a ref + world matrix
+        // chain that can no-op silently if the renderer hasn't painted the
+        // sphere yet (visible={false} on a freshly mounted mesh) — the cluster
+        // record gives us the exact sphere with no plumbing to break.
+        const cluster = clusters.find((c) => c.id === id);
+        if (!cluster) return;
         // Mac trackpads keep emitting wheel events with tiny deltas; without
         // stop() those queued dolly targets pre-empt fitToSphere within a
         // frame and the click reads as "nothing happened."
         controls.stop();
-        // Invisible meshes still get matrices updated each render, but when
-        // fitToSphere fires between frames the world matrix can be a tick
-        // stale; force a refresh so the bounds are correct.
-        mesh.updateMatrixWorld(true);
+        const sphere = new THREE.Sphere(
+          new THREE.Vector3(cluster.cx, cluster.cy, cluster.cz),
+          cluster.radius ?? 5,
+        );
         // Cinematic smoothing just for the fly-to. The steady-state
         // smoothTime is lower so wheel-driven dolly snaps instead of drifting.
         const prevSmooth = controls.smoothTime;
         controls.smoothTime = CINEMATIC_SMOOTHTIME;
-        void controls.fitToSphere(mesh, true).finally(() => {
+        void controls.fitToSphere(sphere, true).finally(() => {
           controls.smoothTime = prevSmooth;
         });
       },
