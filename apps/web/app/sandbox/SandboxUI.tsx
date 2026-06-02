@@ -322,15 +322,27 @@ export default function SandboxUI() {
                   >
                     <span
                       className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ animationDelay: "0ms" }}
+                      style={{
+                        animationDelay: "0ms",
+                        ["--dot-color" as string]: "#14b8a6",
+                        ["--dot-halo" as string]: "rgba(20, 184, 166, 0.55)",
+                      }}
                     />
                     <span
                       className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ animationDelay: "280ms" }}
+                      style={{
+                        animationDelay: "280ms",
+                        ["--dot-color" as string]: "#8b5cf6",
+                        ["--dot-halo" as string]: "rgba(139, 92, 246, 0.55)",
+                      }}
                     />
                     <span
                       className="wiggle-dot inline-block h-1.5 w-1.5 rounded-full"
-                      style={{ animationDelay: "560ms" }}
+                      style={{
+                        animationDelay: "560ms",
+                        ["--dot-color" as string]: "#f59e0b",
+                        ["--dot-halo" as string]: "rgba(245, 158, 11, 0.6)",
+                      }}
                     />
                   </span>
                 ) : (
