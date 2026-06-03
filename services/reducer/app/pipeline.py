@@ -59,14 +59,14 @@ def _reduce_to_3d(x: np.ndarray, reducer: str) -> np.ndarray:
         return out
 
     if reducer == "umap":
-        import umap  # type: ignore
+        import umap
 
         nn = min(15, max(2, n - 1))
         m = umap.UMAP(n_components=3, n_neighbors=nn, random_state=42, init="spectral")
         return m.fit_transform(x).astype(np.float32)
 
     # default: pacmap
-    import pacmap  # type: ignore
+    import pacmap
 
     nn = min(10, max(2, n - 1))
     m = pacmap.PaCMAP(n_components=3, n_neighbors=nn, random_state=42, verbose=False)
@@ -82,7 +82,7 @@ def _cluster(
     n = coords.shape[0]
     if n < 5:
         return np.full(n, -1, dtype=np.int32), np.zeros(n, dtype=np.float32)
-    import hdbscan  # type: ignore
+    import hdbscan
 
     # Default scales gently with n; floor of 5 keeps small CSVs useful. The
     # heuristic over-merges on corpora with many small genuine clusters

@@ -7,13 +7,22 @@ Cache key is content-hash of (model, text) so re-uploads of the same rows are fr
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .config import CACHE_DIR, DEFAULT_EMBED_MODEL, EMBED_DIM, OPENAI_API_KEY
 
-_st_model = None  # lazy-loaded SentenceTransformer
+if TYPE_CHECKING:
+    # Import only for type-checking — sentence-transformers pulls torch on
+    # import and we want the cold reducer to start fast. The runtime import
+    # happens lazily inside _get_local_model().
+    from sentence_transformers import SentenceTransformer
+
+_st_model: SentenceTransformer | None = None  # lazy-loaded
+_log = logging.getLogger(__name__)
 
 OPENAI_MODEL = "text-embedding-3-small"  # 1536-dim natively; truncated to 384
 # Token cap for the OpenAI embedding model. text-embedding-3-small refuses
@@ -45,6 +54,10 @@ def _load_cached(digest: str) -> np.ndarray | None:
         try:
             return np.load(p)
         except Exception:
+            # A corrupted/truncated cache file isn't fatal — the caller
+            # re-computes. But silently swallowing it hides install/disk
+            # problems; log a breadcrumb so the operator can find it.
+            _log.exception("embedding cache: failed to load %s", p)
             return None
     return None
 
@@ -55,7 +68,7 @@ def _save_cached(digest: str, vec: np.ndarray) -> None:
     np.save(p, vec.astype(np.float32, copy=False))
 
 
-def _get_local_model() -> object:
+def _get_local_model() -> SentenceTransformer:
     global _st_model
     if _st_model is None:
         # Import lazily — sentence-transformers pulls in torch which is slow to import.

@@ -89,5 +89,9 @@ class WorkerSettings:
 
 def main() -> None:
     """Console-script entrypoint: `uv run worker`."""
-    run_worker(WorkerSettings)
+    # arq's run_worker accepts a `type[WorkerSettingsBase]`. WorkerSettings is
+    # a structural subclass (arq inspects attributes by name, not by base) —
+    # arq's own typings don't declare the base-class relationship, so mypy
+    # flags this. Runtime is correct.
+    run_worker(WorkerSettings)  # type: ignore[arg-type]
     sys.exit(0)
