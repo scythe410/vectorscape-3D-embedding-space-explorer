@@ -38,6 +38,9 @@ yarn-error.log*
 
 # misc
 coverage/
+.coverage
+.coverage.*
+htmlcov/
 
 # internal docs & temp files
 production_audit_report_*.md
