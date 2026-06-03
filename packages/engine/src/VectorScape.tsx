@@ -226,6 +226,26 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
 
     const fogColor = useMemo(() => new THREE.Color(background), [background]);
 
+    // Shared focus-point vector for the DOF pass. Lives at the renderer root
+    // so SceneController (inside Canvas) can write the live camera-target into
+    // it each frame, and <DepthOfField> can read the same instance — that's
+    // how postprocessing implements true autofocus: target gets projected into
+    // camera space per frame and its depth becomes focusDistance. Seeded from
+    // initialPose so the very first DOF frame focuses on the opening look-at,
+    // not the origin. Allocated once; never replaced.
+    const dofTarget = useMemo(
+      () =>
+        new THREE.Vector3(
+          initialPose.target[0],
+          initialPose.target[1],
+          initialPose.target[2],
+        ),
+      // initialPose is opening-pose only; later target changes flow through
+      // the per-frame controls.getTarget() write in SceneController.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [],
+    );
+
     return (
       <div className={className} style={{ width: "100%", height: "100%", background, ...style }}>
         <Canvas
@@ -266,6 +286,7 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             enableAmbientDrift={enableAmbientDrift}
             initialPose={initialPose}
             onReady={onReady}
+            dofTarget={dofTarget}
           />
 
           {onCameraMove && <CameraReporter onMove={onCameraMove} />}
@@ -293,10 +314,14 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
           )}
 
           {/*
-            DOF first so subsequent passes work in focused space. focusRange
-            is generous so a whole cluster stays sharp once framed, with
-            everything outside softly dreamy. The composer is remounted when
-            the DOF toggle flips so the effect chain stays valid.
+            DOF first so subsequent passes work in focused space. The pass
+            autofocuses on `dofTarget` — that vector is synced each frame
+            inside SceneController to the CameraControls look-at point, so
+            whatever the user has framed (cluster fly-to, manual drag) is
+            what stays sharp. `focalLength` widens the in-focus slice enough
+            to keep a whole cluster crisp once framed; `bokehScale` is dialed
+            down from the earlier static-focus value because real autofocus
+            no longer needs an oversized blur radius to mask wrong focus.
           */}
           {/*
             EffectComposer remounts when the bloom/DOF toggles flip so the
@@ -310,9 +335,9 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
           >
             {enableDOF ? (
               <DepthOfField
-                focusDistance={0.012}
-                focalLength={0.04}
-                bokehScale={3.2}
+                target={dofTarget}
+                focalLength={0.05}
+                bokehScale={2.0}
                 height={720}
               />
             ) : (
@@ -348,6 +373,7 @@ function SceneController({
   enableAmbientDrift,
   initialPose,
   onReady,
+  dofTarget,
 }: {
   clusters: ClusterCentroid[];
   onClusterSelect?: (id: ClusterCentroid["id"], opts: ClusterPickOptions) => void;
@@ -355,6 +381,12 @@ function SceneController({
   enableAmbientDrift: boolean;
   initialPose: ScenePose;
   onReady?: () => void;
+  /**
+   * Shared focus point used by the DOF pass. We rewrite it each frame from
+   * the live CameraControls target so autofocus tracks fly-to and manual
+   * drags without any host plumbing.
+   */
+  dofTarget: THREE.Vector3;
 }) {
   const controlsRef = useRef<CameraControls>(null);
   const targetsRef = useRef<FlyToTargetsHandle>(null);
@@ -534,6 +566,7 @@ function SceneController({
         maxDistance={MAX_DOLLY_DISTANCE}
       />
       {enableAmbientDrift && <AmbientDrift controlsRef={controlsRef} />}
+      <DofAutofocus controlsRef={controlsRef} target={dofTarget} />
       <FlyToTargets ref={targetsRef} clusters={clusters} onPick={onClusterSelect} />
     </>
   );
@@ -549,6 +582,30 @@ function SceneController({
  * in apps/web/lib/proximity.ts. We intentionally don't throttle inside the
  * engine so different surfaces can pick their own cadence.
  */
+/**
+ * Per-frame sync of the CameraControls look-at point into the shared DOF
+ * target Vector3. The DOF pass (in EffectComposer above) reads the same
+ * instance to compute focusDistance each frame, so whatever the controls
+ * are framing — a cluster fly-to, a manual orbit, the intro flythrough
+ * — is exactly what stays sharp.
+ *
+ * Cost: one Vector3 write per frame regardless of whether DOF is enabled;
+ * negligible against the render pass, and keeping the write unconditional
+ * means there's no first-frame stale-focus when the user toggles DOF on.
+ */
+function DofAutofocus({
+  controlsRef,
+  target,
+}: {
+  controlsRef: React.RefObject<CameraControls | null>;
+  target: THREE.Vector3;
+}) {
+  useFrame(() => {
+    controlsRef.current?.getTarget(target);
+  });
+  return null;
+}
+
 function CameraReporter({
   onMove,
 }: {
