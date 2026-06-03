@@ -57,7 +57,7 @@ class _Cursor:
         self._boundary = boundary_script
         self._mode: str = ""
 
-    def execute(self, sql: str, _params: tuple[Any, ...]) -> "_Cursor":
+    def execute(self, sql: str, _params: tuple[Any, ...]) -> _Cursor:
         low = sql.lower()
         if "from public.clusters" in low and "left join public.points" in low:
             self._mode = "cluster"

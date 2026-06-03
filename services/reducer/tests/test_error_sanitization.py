@@ -28,7 +28,6 @@ from app import api as api_module
 from app import auth
 from app.main import app
 
-
 # A sentinel message that would be very embarrassing to leak.
 SENSITIVE_MESSAGE = (
     "FATAL: password authentication failed for user 'postgres' "

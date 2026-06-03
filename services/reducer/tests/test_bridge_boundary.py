@@ -73,7 +73,7 @@ class _Cursor:
         # Stash the last (sql, params) so fetch* can route correctly.
         self._last: tuple[str, tuple[Any, ...]] | None = None
 
-    def execute(self, sql: str, params: tuple[Any, ...]) -> "_Cursor":
+    def execute(self, sql: str, params: tuple[Any, ...]) -> _Cursor:
         low = sql.lower()
         # _fetch_cluster joins clusters and points; the SQL contains both.
         # _fetch_boundary only reads from points and uses `<=>`.

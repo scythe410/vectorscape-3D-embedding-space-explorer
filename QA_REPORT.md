@@ -488,7 +488,148 @@ explicitly documented as out-of-scope for the in-process suite.
 
 ## Phase 5 — Static audit findings
 
-_pending_
+### Static-tool baselines
+
+| Workspace | Tool | Status |
+|---|---|---|
+| `apps/web` | `tsc --noEmit` (strict) | **clean** |
+| `packages/engine` | `tsc --noEmit` (strict) | **clean** |
+| `services/reducer` | `ruff check app tests` | **clean** (4 nits auto-fixed in this phase: 2× `UP037` quoted self-refs in new test files, 2× `I001` import ordering) |
+| `services/reducer` | `mypy app` | **5 findings**, all minor |
+
+Mypy added as a dev dependency in this phase (`mypy>=1.13`) with a
+project-level config in `pyproject.toml` (`ignore_missing_imports=true`
+because sentence-transformers / pacmap / umap / hdbscan / arq stubs
+are nonexistent or incomplete; `check_untyped_defs=true` so our own
+code still gets attribute and argument-type checks).
+
+### Findings — to be addressed in Phase 6
+
+Each finding is tagged `[H]` (must-fix), `[M]` (should-fix), `[L]`
+(noted; defer with rationale OK). The "structural" audit (THREE
+disposal, async/sync, swallowed exceptions, N+1, `any` leakage) is
+folded in.
+
+#### F-1 [M] `app/embeddings.py:70` — return type `object` defeats type-checking
+
+`_get_local_model()` is annotated `-> object`, so the `.encode(...)`
+call on the next line is unverifiable. The fix is a precise return
+annotation — `SentenceTransformer` from sentence-transformers — guarded
+by `TYPE_CHECKING` so it doesn't pull torch on import.
+
+Why it matters: this hides the load-bearing call site for embeddings
+behind `Any`. A future rename in sentence-transformers (or a
+mismatched stub) would slip silently past mypy.
+
+#### F-2 [L] `app/pipeline.py:62, 69, 85` — three unused `# type: ignore` comments
+
+Stubs caught up to the imports they were silencing; the comments
+are dead weight. Remove.
+
+#### F-3 [M] `app/worker.py:92` — `arq.run_worker(WorkerSettings)` argument-type mismatch
+
+arq's `WorkerSettingsBase` is a base class; mypy can't see that
+`WorkerSettings` is a subclass because arq's stubs don't declare
+the protocol. A targeted `# type: ignore[arg-type]` with a comment
+naming arq is the right fix (this IS a stub gap, not a real bug —
+the runtime works).
+
+#### F-4 [H] Engine GPU memory leaks on unmount — `ClusterEdges.tsx`, `FlyToTargets.tsx`
+
+`ClusterEdges.tsx:46` creates `new THREE.CylinderGeometry(…)` via
+`useMemo([])`; `FlyToTargets.tsx:35` creates `new THREE.SphereGeometry(…)`
+the same way. Neither has a `useEffect(() => { return () => geom.dispose() }, [geom])`
+cleanup. When the surrounding `<VectorScape>` unmounts (e.g.
+navigating between `/lens` and `/sandbox`, or live HMR), these
+GPU buffers leak until full V8 GC of the scene graph — which can
+take many seconds at the 350k-point budget.
+
+`PointsCloud.tsx:119` already implements the correct pattern; the
+two other components diverged. Fix is straightforward: add the
+same dispose effect.
+
+`ClusterLabels.tsx`'s `useMemo` instances are `THREE.Vector3`s —
+JS-side, no GPU resource, no leak. Skip.
+
+#### F-5 [M] `embeddings.py:47` — `except Exception: return None` swallows cache-load errors
+
+The `np.load(p)` of a sharded `.npy` cache returns None on failure,
+silently. A corrupted cache file (truncated, wrong dtype, etc.)
+yields `None` and the caller silently re-computes — *correct
+runtime behavior*, but the failure is invisible. A future cache
+corruption would never surface in logs.
+
+Fix: `logging.exception("cache load failed for %s", p)` before
+the `return None`. The cache-miss path still wins; the operator
+gets a breadcrumb.
+
+#### F-6 [M] `labeling.py:201, 226` — `except Exception` swallows LLM failures
+
+Two locations in the LLM-label path catch any exception and fall
+back to the free c-TF-IDF label. Per BUILDLOG and the labeling
+docstring this is intentional ("per-cluster LLM fallback") so a
+transient OpenAI failure doesn't tank the whole pipeline. But the
+catch is silent: there's no log line for the failed cluster.
+
+Fix: `logging.warning("LLM label failed for cluster %s: %s", cid, exc)`
+inside the except. Behavior stays the same; debugging gets cheaper.
+
+#### F-7 [L] `api.py:embed_reduce` does sync DB calls before the anyio.to_thread offload
+
+Lines 83-91 (`with connect() as conn: ensure_project(...); set_status(...)`)
+run inline in the `async def` handler. These block the event loop
+for tens of milliseconds — small, but technically a violation of
+the "no blocking work on the async route" rule the QA-1 fix
+established.
+
+The cost is small (one INSERT + one UPDATE roundtrip) and the
+fix (wrapping in a second `await anyio.to_thread.run_sync`) is
+mechanical. Defer to Phase 6 only if there's room; otherwise note
+and move on. Mark `[L]` for now.
+
+#### F-8 [L] N+1-style pagination on `/api/projects/[id]/data`
+
+Both `drainPoints` and `streamPointsIntoColumns` paginate Supabase
+1000 rows at a time. At 100k points that's 100 round trips. Already
+documented in BUILDLOG as a known limitation (a Postgres RPC would
+collapse this to a single call) and tagged "out of MVP scope". No
+correctness issue. Record and move on.
+
+#### F-9 [L] `any` leakage at module boundaries
+
+Grep across `apps/web/app`, `apps/web/lib`, `packages/engine/src`
+for `: any`, `<any>`, `as any` — **zero matches** (re-confirmed in
+Phase 5). The TypeScript strict baseline is intact.
+
+The TS code does use `unknown` at a few JSON-parse boundaries (e.g.
+`as Partial<SearchResult>`), which is the correct pattern —
+narrowed via field-by-field assignments. Not a finding.
+
+#### F-10 (confirmed clean) DB cursor lifecycle in the reducer
+
+All `psycopg.Connection` use sites in `app/db.py`, `app/api.py`,
+`app/bridge.py`, `app/search.py`, `app/worker.py` go through
+`with connect() as conn: …`. psycopg's context manager closes the
+connection and its open cursors on `__exit__` whether the block
+exits normally or via exception. No leak path observed.
+
+#### F-11 (confirmed clean) `arq` worker process
+
+`app/worker.py` uses arq's `run_worker` entrypoint which owns the
+Redis connection pool lifecycle. No manual close needed in app
+code; arq drains in-flight jobs and closes pools on SIGTERM.
+
+### Summary of categories the brief named
+
+| Category | Finding | Phase 6 plan |
+|---|---|---|
+| swallowed exceptions / bare except | F-5, F-6 (3 sites) | Add `logging.exception` / `logging.warning` to each |
+| CPU-bound work on async routes | F-7 (event-loop fix held; small remaining leak) | Defer (low impact) or wrap with anyio |
+| missing resource cleanup (THREE) | F-4 (cylinder, sphere) | Add dispose useEffect to both |
+| missing resource cleanup (DB cursors) | F-10 (already clean) | n/a |
+| unbounded / N+1 queries | F-8 (paginated 1000-at-a-time) | Defer (BUILDLOG already records) |
+| `any`-type leakage | F-9 (already clean) | n/a |
+| mypy on reducer | F-1, F-2, F-3 (5 findings) | Fix in Phase 6 — return type + remove unused ignores + targeted arq ignore |
 
 ## Phase 6 — Final state
 
