@@ -52,12 +52,12 @@ export default function SandboxViewer({ projectId }: Props) {
     () =>
       loaded
         ? loaded.centroids.map((c) => ({
-            id: c.id,
-            label: c.label ?? `Cluster ${c.id}`,
-            cx: c.cx,
-            cy: c.cy,
-            cz: c.cz,
-          }))
+          id: c.id,
+          label: c.label ?? `Cluster ${c.id}`,
+          cx: c.cx,
+          cy: c.cy,
+          cz: c.cz,
+        }))
         : [],
     [loaded],
   );
@@ -254,12 +254,15 @@ export default function SandboxViewer({ projectId }: Props) {
           }}
         />
         {/* Live proximity readout — shows the top 2-3 regions the camera is
-            "between" right now, fades when settled inside one cluster. */}
-        <ProximityReadout
-          cameraPos={cameraPos}
-          centroids={proximityCentroids}
-          position="bottom-center"
-        />
+            "between" right now, fades when settled inside one cluster.
+            Extra bottom padding on the wrapper clears the nav-hint pill. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-8 top-0">
+          <ProximityReadout
+            cameraPos={cameraPos}
+            centroids={proximityCentroids}
+            position="bottom-center"
+          />
+        </div>
         {/* Title card: names the top regions on first load of this project,
             then dissolves into the live galaxy. Once per session per project. */}
         <RegionTitleCard
@@ -272,6 +275,18 @@ export default function SandboxViewer({ projectId }: Props) {
             /* sandbox has no flythrough — the card just dissolves into the live galaxy. */
           }}
         />
+        {/* Open this galaxy in the full-screen cinematic frame (new tab) —
+            same title card + flythrough as the SKM lens demo, but for the
+            user's project. */}
+        <a
+          href={`/sandbox/${projectId}/cinematic`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute right-3 top-3 rounded-full border border-white/10 bg-black/50 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-neutral-300 backdrop-blur transition hover:border-amber-300/60 hover:text-amber-200"
+          title="Open this galaxy in cinematic view (new tab)"
+        >
+          open cinematic ↗
+        </a>
         <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/50 px-2 py-1 text-xs text-neutral-300 backdrop-blur">
           {loaded.project.name} · {loaded.totalPoints.toLocaleString()} points ·{" "}
           {loaded.clusters.length} clusters
