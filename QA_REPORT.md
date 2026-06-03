@@ -292,7 +292,111 @@ No production behavior change in any of the three.
 
 ## Phase 3 — Integration tests
 
-_pending_
+Added 20 tests + 2 SQL test files. Total suite now 153 tests (61 reducer +
+62 web + 30 engine). All green.
+
+### Files added
+
+**Web** (`apps/web/`):
+- `app/api/waitlist/route.test.ts` — 8 tests for `POST /api/waitlist`.
+  Uses `bun:test`'s `mock.module` to replace `@/lib/supabase/server`
+  with a recording fake. Covers: non-JSON body → 400, missing email →
+  400, too-long email → 400, malformed email → 400, bad platform → 400,
+  email is normalized to lower-case + trimmed before insert,
+  unique-violation `23505` collapses to `{ok: true, already: true}` (the
+  contract the route's UX relies on), generic DB error → 500.
+- `app/api/projects/[id]/data/route.test.ts` — 8 tests for
+  `GET /api/projects/[id]/data`. Fakes the supabase server-client +
+  query chain. Covers: 401 no session, 404 cross-tenant (RLS returns no
+  row), 500 on projects-table error, 409 when `status !== 'ready'`,
+  200 JSON path for small `point_count`, edges included when present,
+  edges degrade to `[]` when the `cluster_edges` table is missing
+  (mid-deploy resilience), 200 Arrow path triggers at point_count > 50k
+  AND the response bytes round-trip cleanly through `unpackArrowBundle`
+  + `tableFromIPC` (proves both halves of the wire codec live in one
+  shared module).
+
+**Reducer** (`services/reducer/tests/`):
+- `test_error_sanitization.py` — 4 tests for the QA-6 sanitization
+  contract. Drives synthetic `ConnectionError`, `RuntimeError`,
+  `TimeoutError`, and a fake-psycopg-shaped exception through the
+  `/embed-reduce` sync path and asserts: response status is 500 (never
+  swallowed 200), response body does NOT contain the raw exception
+  message (no `password`, `db.internal`, `LINE 1`, etc.), DB row's
+  `error_message` column receives the static generic copy
+  `"Reduction failed. Check the reducer service logs for details."`,
+  the exception type name is acceptable in the response (operators need
+  to debug) but no message contents.
+
+**Supabase** (`supabase/tests/`):
+- `waitlist_rls.sql` — proves the waitlist's "anon insert-only, no
+  SELECT for anyone" contract. Five sub-checks: anon SELECT sees zero
+  rows; anon INSERT succeeds; a duplicate insert raises `unique_violation`
+  (sqlstate 23505 — what `/api/waitlist` switches on); authenticated
+  SELECT also sees zero; authenticated INSERT succeeds. Rolls back. Run
+  with `supabase db query --linked --file supabase/tests/waitlist_rls.sql`.
+  **Not executed in this session** — requires linked-cloud access (the
+  user drives `supabase db query`); the file is checked in for that.
+- `storage_csv_uploads_rls.sql` — proves the four
+  `storage.objects` policies on the `csv-uploads` bucket. Five sub-checks:
+  user A sees their own object inside `A/...`; user A sees nothing under
+  `B/...`; user A INSERT under `B/...` is rejected (the load-bearing
+  folder-prefix policy); UPDATE under `B/...` from A's session affects
+  zero rows; anon sees nothing in the bucket. Rolls back. Same execution
+  story: checked in, runs against linked cloud.
+
+### Coverage after Phase 3 (reducer)
+
+```
+Name                Stmts   Miss  Cover   Δ vs Phase 2
+-------------------------------------------------------
+app/adjacency.py       47      3    94%   ±0
+app/api.py             87     17    80%   +32pp ✓
+app/bridge.py         113     21    81%   ±0
+app/db.py              67     50    25%   ±0   (real DB only)
+app/embeddings.py      85     66    22%   ±0   (real ML only)
+app/labeling.py       115     17    85%   ±0
+app/pipeline.py       101     26    74%   ±0
+app/progress.py        31     22    29%   ±0   (real Redis only)
+app/search.py         113      4    96%   ±0
+app/text_fence.py      15      2    87%   ±0
+-------------------------------------------------------
+TOTAL                 816    228    72%   +3pp
+```
+
+`api.py` jumped 48% → 80% — the sanitization tests now exercise the
+try/except + record-error branches. All logic modules sit at or above
+the brief's 80% line target except `pipeline.py` (74%, close), and the
+remaining 26 lines are real PaCMAP / HDBSCAN code paths that need real
+ML.
+
+Three modules stay low — `db.py` (25%), `embeddings.py` (22%),
+`progress.py` (29%) — by design. They are pure I/O wrappers around
+psycopg, sentence-transformers, and Redis; the brief tags them
+"best-effort" and the integration test approach (which would require a
+live Postgres + Redis + model) is out of scope for the in-process CI
+loop. The cloud-RLS SQL tests above + the existing reducer-side
+fake-cursor tests are the closest substitute.
+
+### What's not covered (explicitly handed forward)
+
+- **Full live-stack lifecycle** (CSV → real `embed_texts` → real
+  `_reduce_to_3d` → real Postgres write → web fetch → Arrow decode).
+  Each layer is now individually proved against a fake, but no test
+  joins them with real implementations. The path is exercised by hand
+  via the dev stack; spinning it up in CI is the deferred-production
+  work in `roadmap.md` "Deferred production hardening".
+- **Live RLS execution.** The two SQL files above are correct against
+  the current schema (they reproduce the same `set_config` pattern as
+  the existing cross-tenant test), but verifying their `NOTICE: …
+  PASS` lines requires `supabase db query --linked` against the cloud
+  project. The repository's CI does not currently link to a Supabase
+  project, so this is a "user-driven verification" step.
+- **JWT-claim scoping beyond `role` + `sub`.** Brief mentioned this as
+  a gap candidate. Supabase's `current_tenant_id()` helper derives the
+  tenant from `profiles` keyed on `sub`, not from a JWT claim directly;
+  the existing cross-tenant test already exercises the resolution path.
+  No additional test added; flagged here for completeness.
 
 ## Phase 4 — Security tests
 
