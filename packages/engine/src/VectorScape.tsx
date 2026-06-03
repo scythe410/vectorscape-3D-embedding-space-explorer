@@ -16,12 +16,14 @@ import {
 import * as THREE from "three";
 
 import { AmbientDrift } from "./scene/AmbientDrift";
+import { ClusterEdges } from "./scene/ClusterEdges";
 import { ClusterLabels } from "./scene/ClusterLabels";
 import { FlyToTargets, type FlyToTargetsHandle } from "./scene/FlyToTargets";
 import { PointPicker } from "./scene/PointPicker";
 import { PointsCloud } from "./scene/PointsCloud";
 import type {
   ClusterCentroid,
+  ClusterEdge,
   ClusterPickOptions,
   PointsData,
   RenderStats,
@@ -122,6 +124,16 @@ export interface VectorScapeProps {
    * moves again, so an idle galaxy doesn't keep the host's React tree busy.
    */
   onCameraMove?: (position: [number, number, number]) => void;
+  /**
+   * Semantic adjacency edges between cluster pairs. Pre-computed server-side
+   * in embedding space; the engine just draws them faintly. Caller is
+   * responsible for the top-N cap — pass at most a few or the calm breaks.
+   * Off by default in every consumer (opt-in toggle), so omit or pass [] to
+   * render nothing.
+   */
+  edges?: ClusterEdge[];
+  onEdgeHover?: (edge: ClusterEdge | null) => void;
+  onEdgeClick?: (edge: ClusterEdge) => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -183,6 +195,9 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       initialPose = DEFAULT_INITIAL_POSE,
       onReady,
       onCameraMove,
+      edges,
+      onEdgeHover,
+      onEdgeClick,
       className,
       style,
     },
@@ -256,6 +271,15 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
 
           {showClusterLabels && clusters.length > 0 && (
             <ClusterLabels clusters={clusters} />
+          )}
+
+          {edges && edges.length > 0 && clusters.length > 0 && (
+            <ClusterEdges
+              edges={edges}
+              centroids={clusters}
+              onEdgeHover={onEdgeHover}
+              onEdgeClick={onEdgeClick}
+            />
           )}
 
           {onPointPick && (

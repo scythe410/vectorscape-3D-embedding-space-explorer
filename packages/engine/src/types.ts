@@ -41,6 +41,21 @@ export interface ClusterCentroid {
   label?: string;
 }
 
+/**
+ * A semantic adjacency between two clusters, computed server-side in the
+ * original high-dimensional embedding space (not from 3D projection — UMAP
+ * and PaCMAP distort global distance, so 3D nearness lies). The engine just
+ * draws the lines; it does not rank or filter.
+ */
+export interface ClusterEdge {
+  /** Lower cluster id of the pair (canonical form). */
+  a: number;
+  /** Higher cluster id of the pair. */
+  b: number;
+  /** Cosine similarity in [-1, 1]; controls line opacity + thickness. */
+  similarity: number;
+}
+
 /** One stop on a cinematic flythrough path. */
 export interface FlythroughKeyframe {
   /** Camera position in world space. */

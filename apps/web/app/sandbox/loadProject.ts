@@ -1,5 +1,5 @@
 import { tableFromIPC, type Table } from "apache-arrow";
-import type { ClusterCentroid, PointsData } from "engine";
+import type { ClusterCentroid, ClusterEdge, PointsData } from "engine";
 
 export type ProjectMeta = { id: string; name: string; point_count: number };
 
@@ -13,6 +13,12 @@ export type ClusterRow = {
   medoid_point_id: string | null;
 };
 
+export type ClusterEdgeRow = {
+  cluster_a: number;
+  cluster_b: number;
+  similarity: number;
+};
+
 /**
  * What the UI consumes regardless of wire format. `getPoint` is lazy on
  * purpose — the Arrow path decodes utf8 text on demand instead of materializing
@@ -23,6 +29,10 @@ export type LoadedProject = {
   pointsData: PointsData;
   centroids: ClusterCentroid[];
   clusters: ClusterRow[];
+  /** Top semantic adjacencies between clusters, computed server-side in
+   *  embedding space. Empty when the reducer hasn't run on the new pipeline
+   *  yet, or when the project has fewer than two named clusters. */
+  edges: ClusterEdge[];
   totalPoints: number;
   getPoint: (index: number) => {
     text: string;
@@ -75,6 +85,15 @@ function buildCentroids(clusters: ClusterRow[]): ClusterCentroid[] {
   }));
 }
 
+function buildEdges(rows: ClusterEdgeRow[] | undefined): ClusterEdge[] {
+  if (!rows) return [];
+  return rows.map((r) => ({
+    a: r.cluster_a,
+    b: r.cluster_b,
+    similarity: r.similarity,
+  }));
+}
+
 /**
  * Tight loops to fill the color / size / probability buffers. Runs on the
  * main thread; ~5ms for 350k points, ~1.5ms for 100k — well under one frame.
@@ -119,6 +138,7 @@ type JsonPayload = {
   project: ProjectMeta;
   points: JsonPointRow[];
   clusters: ClusterRow[];
+  edges?: ClusterEdgeRow[];
 };
 
 function fromJson(payload: JsonPayload): LoadedProject {
@@ -145,6 +165,7 @@ function fromJson(payload: JsonPayload): LoadedProject {
     pointsData: { position, color, size, probability },
     centroids: buildCentroids(payload.clusters),
     clusters: payload.clusters,
+    edges: buildEdges(payload.edges),
     totalPoints: n,
     getPoint: (i) => {
       const p = payload.points[i];
@@ -160,7 +181,11 @@ function fromJson(payload: JsonPayload): LoadedProject {
   };
 }
 
-type ArrowMeta = { project: ProjectMeta; clusters: ClusterRow[] };
+type ArrowMeta = {
+  project: ProjectMeta;
+  clusters: ClusterRow[];
+  edges?: ClusterEdgeRow[];
+};
 
 function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
   const t0 = performance.now();
@@ -221,6 +246,7 @@ function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
     pointsData: { position, color, size, probability },
     centroids: buildCentroids(meta.clusters),
     clusters: meta.clusters,
+    edges: buildEdges(meta.edges),
     totalPoints: n,
     getPoint: (i) => {
       const c = clusterIds[i];

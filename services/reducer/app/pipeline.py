@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .adjacency import ClusterEdgeRow, compute_top_edges
 from .config import COORD_SCALE, DEFAULT_EMBED_MODEL, DEFAULT_REDUCER, PCA_THRESHOLD
 from .embeddings import embed_texts
 from .labeling import label_clusters
@@ -31,6 +32,7 @@ class PipelineResult:
     cluster_ids: np.ndarray  # (N,) int32 (-1 = noise)
     cluster_probabilities: np.ndarray  # (N,) float32 in [0, 1]
     clusters: list[ClusterRow]
+    edges: list[ClusterEdgeRow]  # top semantic adjacencies in embedding space
     used_pca: bool
     reducer: str
     embed_model: str
@@ -171,12 +173,18 @@ def run_pipeline(
     for row in clusters:
         row.label = labels.get(row.cluster_id, row.label)
 
+    # Top semantic adjacencies — computed in embedding space, never in coord
+    # space. UMAP/PaCMAP scramble global distances; the 3D galaxy is for
+    # navigation feel, not for picking neighbors.
+    edges = compute_top_edges(embeddings, cluster_ids, top_n=3)
+
     return PipelineResult(
         embeddings=embeddings,
         coords=coords,
         cluster_ids=cluster_ids,
         cluster_probabilities=probs,
         clusters=clusters,
+        edges=edges,
         used_pca=used_pca,
         reducer=reducer,
         embed_model=embed_model,

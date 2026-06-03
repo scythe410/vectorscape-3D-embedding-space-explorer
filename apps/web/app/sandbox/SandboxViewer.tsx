@@ -41,6 +41,10 @@ export default function SandboxViewer({ projectId }: Props) {
   const [selection, setSelection] = useState<number[]>([]);
   const [hqMode, setHqMode] = useState(false);
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
+  const [edgesEnabled, setEdgesEnabled] = useState(false);
+  const [hoveredEdge, setHoveredEdge] = useState<{ a: number; b: number } | null>(
+    null,
+  );
   const handleRef = useRef<VectorScapeHandle | null>(null);
   const { cameraPos, onCameraMove } = useTrackedCamera(120);
 
@@ -65,6 +69,7 @@ export default function SandboxViewer({ projectId }: Props) {
     setPickedIndex(null);
     setSelection([]);
     setSearchResult(null);
+    setHoveredEdge(null);
 
     loadProject(projectId)
       .then((p) => {
@@ -241,6 +246,12 @@ export default function SandboxViewer({ projectId }: Props) {
           onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
           onCameraMove={onCameraMove}
           showClusterLabels
+          edges={edgesEnabled ? loaded.edges : undefined}
+          onEdgeHover={setHoveredEdge}
+          onEdgeClick={(e) => {
+            setSelection([e.a, e.b]);
+            setHoveredEdge(null);
+          }}
         />
         {/* Live proximity readout — shows the top 2-3 regions the camera is
             "between" right now, fades when settled inside one cluster. */}
@@ -271,19 +282,55 @@ export default function SandboxViewer({ projectId }: Props) {
         <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-black/50 px-2 py-1 text-[11px] text-neutral-400 backdrop-blur">
           Click cluster · scroll/drag to fly · shift-click two clusters to bridge
         </div>
-        <button
-          type="button"
-          onClick={() => setHqMode((v) => !v)}
-          className={
-            "absolute bottom-3 right-3 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur transition " +
-            (hqMode
-              ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
-              : "border-white/10 bg-black/50 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
-          }
-          title="Depth-of-field bokeh — best for screenshots and slow exploration"
-        >
-          {hqMode ? "HQ · on" : "HQ"}
-        </button>
+        <div className="absolute bottom-3 right-3 flex items-center gap-2">
+          {loaded.edges.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setEdgesEnabled((v) => !v)}
+              className={
+                "rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur transition " +
+                (edgesEnabled
+                  ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
+                  : "border-white/10 bg-black/50 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
+              }
+              title="Faint lines between the most semantically-similar cluster pairs (computed in embedding space). Hover a line to preview, click to bridge."
+            >
+              {edgesEnabled ? `links · ${loaded.edges.length}` : "links"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setHqMode((v) => !v)}
+            className={
+              "rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur transition " +
+              (hqMode
+                ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
+                : "border-white/10 bg-black/50 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
+            }
+            title="Depth-of-field bokeh — best for screenshots and slow exploration"
+          >
+            {hqMode ? "HQ · on" : "HQ"}
+          </button>
+        </div>
+
+        {/* Hover-only edge label. Only mounted when an edge is actively
+            hovered AND edges are on; otherwise edges read as pure shape. */}
+        {edgesEnabled && hoveredEdge && (
+          <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-amber-300/40 bg-black/60 px-4 py-1.5 backdrop-blur-md">
+            <div className="flex items-baseline gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-amber-200/90">
+              <span className="text-neutral-200">
+                {loaded.centroids.find((c) => Number(c.id) === hoveredEdge.a)?.label ??
+                  `Cluster ${hoveredEdge.a}`}
+              </span>
+              <span className="text-neutral-500">↔</span>
+              <span className="text-neutral-200">
+                {loaded.centroids.find((c) => Number(c.id) === hoveredEdge.b)?.label ??
+                  `Cluster ${hoveredEdge.b}`}
+              </span>
+              <span className="ml-1 text-[9px] text-neutral-500">click to bridge</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <aside className="flex flex-col gap-3 overflow-hidden">

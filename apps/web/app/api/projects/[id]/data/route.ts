@@ -31,6 +31,12 @@ type ClusterRow = {
   medoid_point_id: string | null;
 };
 
+type ClusterEdgeRow = {
+  cluster_a: number;
+  cluster_b: number;
+  similarity: number;
+};
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -77,9 +83,26 @@ export async function GET(
   }
   const clusterRows = (clusters ?? []) as ClusterRow[];
 
+  // Top semantic adjacencies for the optional "show links" overlay. Older
+  // projects (pre-migration) won't have rows — that's fine, we'd just emit
+  // an empty array. A missing-table error degrades to an empty list too so
+  // a mid-deploy reducer can't tank the data endpoint for older projects.
+  let edgeRows: ClusterEdgeRow[] = [];
+  const { data: edges, error: edgesErr } = await supabase
+    .from("cluster_edges")
+    .select("cluster_a, cluster_b, similarity")
+    .eq("project_id", id)
+    .order("similarity", { ascending: false });
+  if (edgesErr) {
+    // Don't fail the whole response on a missing optional table.
+    edgeRows = [];
+  } else {
+    edgeRows = (edges ?? []) as ClusterEdgeRow[];
+  }
+
   if (useArrow) {
     const columns = await streamPointsIntoColumns(supabase, id, project.point_count);
-    return arrowResponseFromColumns(project, columns, clusterRows);
+    return arrowResponseFromColumns(project, columns, clusterRows, edgeRows);
   }
 
   // JSON path — below ARROW_THRESHOLD, the intermediate array is fine.
@@ -92,6 +115,7 @@ export async function GET(
     },
     points,
     clusters: clusterRows,
+    edges: edgeRows,
   });
 }
 
@@ -217,6 +241,7 @@ function arrowResponseFromColumns(
   project: { id: string; name: string; point_count: number },
   cols: Awaited<ReturnType<typeof streamPointsIntoColumns>>,
   clusters: ClusterRow[],
+  edges: ClusterEdgeRow[],
 ): Response {
   const table = tableFromArrays({
     id: cols.id,
@@ -236,6 +261,7 @@ function arrowResponseFromColumns(
       point_count: cols.n,
     },
     clusters,
+    edges,
   });
   const metaBytes = new TextEncoder().encode(metaJson);
 

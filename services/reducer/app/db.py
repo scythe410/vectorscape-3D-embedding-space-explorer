@@ -110,6 +110,10 @@ def fetch_status(conn: psycopg.Connection, project_id: str) -> dict | None:
 
 
 def _delete_existing(conn: psycopg.Connection, project_id: str) -> None:
+    # Order matters: edges reference clusters indirectly (by cluster_id, not FK),
+    # but cleaning edges first keeps the failure mode obvious if either drop
+    # changes shape later.
+    conn.execute("delete from public.cluster_edges where project_id = %s", (project_id,))
     conn.execute("delete from public.clusters where project_id = %s", (project_id,))
     conn.execute("delete from public.points where project_id = %s", (project_id,))
 
@@ -203,6 +207,27 @@ def write_results(
                 cluster_rows,
             )
 
+        edge_rows = [
+            (
+                str(uuid.uuid4()),
+                project_id,
+                tenant_id,
+                e.cluster_a,
+                e.cluster_b,
+                e.similarity,
+            )
+            for e in result.edges
+        ]
+        if edge_rows:
+            cur.executemany(
+                """
+                insert into public.cluster_edges
+                  (id, project_id, tenant_id, cluster_a, cluster_b, similarity)
+                values (%s, %s, %s, %s, %s, %s)
+                """,
+                edge_rows,
+            )
+
     conn.execute(
         """
         update public.projects
@@ -218,6 +243,7 @@ def write_results(
         "tenant_id": tenant_id,
         "n_points": n,
         "n_clusters": len(result.clusters),
+        "n_edges": len(result.edges),
         "n_noise": noise,
         "used_pca": result.used_pca,
         "reducer": result.reducer,
