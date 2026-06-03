@@ -16,6 +16,7 @@
     "@react-three/postprocessing": "3.0.4",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
+    "@vercel/analytics": "^2.0.1",
     "apache-arrow": "^18.0.0",
     "engine": "workspace:*",
     "leva": "^0.10.1",

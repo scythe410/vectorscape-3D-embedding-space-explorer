@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, DM_Sans, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 // Design system per design.md — characterful display, quiet body, precise mono.
@@ -57,6 +58,7 @@ export default function RootLayout({
       */}
       <body className="font-body" suppressHydrationWarning>
         {children}
+        <Analytics />
       </body>
     </html>
   );
