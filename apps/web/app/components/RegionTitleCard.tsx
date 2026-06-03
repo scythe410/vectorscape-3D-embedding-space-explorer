@@ -157,7 +157,10 @@ export default function RegionTitleCard({
     <div
       className="pointer-events-auto absolute inset-0 z-[60] flex items-center justify-center bg-black"
       style={{
-        opacity: dissolving ? 0 : visible ? 1 : 0,
+        // Backdrop is fully opaque from first paint so the galaxy beneath
+        // doesn't flash through before the card fades in. Only the dissolve
+        // (exit) animates opacity; entry is handled by the list-item stagger.
+        opacity: dissolving ? 0 : 1,
         transition: `opacity ${fadeMs}ms ease-out`,
       }}
       role="dialog"
