@@ -18,7 +18,8 @@
     "dev": "vite",
     "build": "vite build --mode lib && tsc --emitDeclarationOnly -p tsconfig.build.json",
     "build:demo": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src"
   },
   "peerDependencies": {
     "@react-three/drei": ">=10",

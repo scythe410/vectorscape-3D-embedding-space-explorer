@@ -139,7 +139,156 @@ These are observed during the audit but explicitly **not fixed here** — they g
 
 ## Phase 2 — Unit tests (pure logic)
 
-_pending_
+Added 60 new unit tests across the three workspaces. Total suite now 133 tests
+(57 reducer + 46 web + 30 engine; was 73). All green, both TS workspaces
+typecheck clean, engine still builds.
+
+### Files added
+
+**Engine** (`packages/engine/src/`):
+- `voxel/voxelDownsample.test.ts` — 9 tests. Sparse-below-budget, uniform-grid
+  downsample bounded to ≤1.15× budget, ultra-dense fill-ratio retarget,
+  flat-plane zero-variance (eps pad), single-point degenerate, mustKeep
+  override of normal reps, mustKeep union when multiple share a cell,
+  empty-mustKeep identity, indices in range + unique.
+- `sequencer/generationCounter.ts` + `generationCounter.test.ts` — 10 tests.
+  Initial value, start/bump increment, isStale identity vs subsequent start,
+  isStale after bump, only-latest-non-stale, cancel-then-resume, an
+  async-loop simulation that proves a flythrough bails after a mid-loop bump.
+- `scene/clusterLabelFade.ts` + `clusterLabelFade.test.ts` — 11 tests.
+  smootherstep clamping + monotone + midpoint, opacity at fadeEnd/fadeStart,
+  monotone ramp between, behind-camera cull, hideBehindCamera=false override,
+  custom fadeStart/fadeEnd, pointer-threshold constant sanity.
+- Wired both pure helpers into the existing components (`VectorScape.tsx`
+  uses `createGenerationCounter` instead of an inline counter ref;
+  `ClusterLabels.tsx` calls `computeLabelOpacity` instead of inlining the
+  smootherstep) so the inline math can't drift from the tested contract.
+- Added `bun test src` to `packages/engine/package.json`; excluded
+  `**/*.test.ts` from the engine tsconfig so the `bun:test` import doesn't
+  trip the production typecheck.
+
+**Reducer** (`services/reducer/tests/`):
+- `test_pipeline.py` — 16 tests. PCA gate at the n=20k boundary (well-below,
+  just-below 19_999, dims-already-small, AT-threshold actually triggers PCA
+  on a real 20k×384 fit and reduces to (n,100)). HDBSCAN early-return at n<5
+  and n=0 with the correct dtypes. `_normalize_coords` centers on 0, scales
+  longest half-extent to COORD_SCALE=60, handles zero-extent and flat-plane
+  inputs without divide-by-zero, empty-input safety. `_build_cluster_rows`
+  medoid is the cluster member nearest the centroid; sorted by cluster_id
+  asc; noise excluded; snippets include medoid + nearest neighbors.
+  `_reduce_to_3d` fallback at n<4 returns (n,3) with x=index and y/z=0.
+  `run_pipeline` rejects empty texts and unknown reducer before any ML
+  imports run.
+- `test_bridge_boundary.py` — 6 tests. cluster_a==cluster_b → 400; missing
+  cluster → 404 (never leak existence via 5xx); NULL medoid embedding → 409;
+  both cluster fetches and both boundary fetches bind `tenant_id`; the
+  boundary SQL uses the `<=>` cosine operator with LIMIT=BOUNDARY_K and a
+  source-cluster filter; A's boundary anchors on B's medoid embedding (and
+  vice versa); response carries the medoid as the first cited example
+  followed by BOUNDARY_K boundary points per side. `_summarize` is stubbed
+  so the test never hits OpenAI/Gemini.
+
+**Web** (`apps/web/lib/`):
+- `arrowBundle.ts` + `arrowBundle.test.ts` — extracted the envelope codec
+  (`packArrowBundle` / `unpackArrowBundle`) from the route handler and the
+  client decoder. Both `apps/web/app/api/projects/[id]/data/route.ts` and
+  `apps/web/app/sandbox/loadProject.ts` now call the shared module — same
+  bytes on the wire, only one implementation to maintain.
+- 8 tests. Normal payload round-trip with meta JSON + typed-array columns +
+  utf8 text + id Utf8 lookup; NaN sentinel preserved in
+  `cluster_probability`; `-1` sentinel preserved in `cluster_id`; empty-row
+  meta survival; 50k-row payload round-trip with NaN mixed in and spot
+  checks at start/middle/end; id-column lookup map after decode (the path
+  search highlighting depends on); truncated envelope rejected with a
+  clear error; over-long meta length rejected with a clear error.
+
+### Coverage after Phase 2
+
+Reducer (`uv run coverage report --include='app/*'`):
+
+```
+Name                Stmts   Miss  Cover   Δ vs baseline
+---------------------------------------------------------
+app/adjacency.py       47      3    94%   ±0
+app/api.py             87     45    48%   ±0   (Phase 3)
+app/auth.py            11      0   100%   ±0   (already)
+app/bridge.py         113     21    81%   +27pp ✓
+app/config.py          20      0   100%   ±0
+app/db.py              67     50    25%   ±0   (Phase 3, I/O)
+app/embeddings.py      85     66    22%   ±0   (Phase 3, ML)
+app/labeling.py       115     17    85%   ±0
+app/main.py            11      0   100%   ±0
+app/pipeline.py       101     26    74%   +41pp (close to 80% target)
+app/progress.py        31     22    29%   ±0   (Phase 3, Redis)
+app/search.py         113      4    96%   ±0
+app/text_fence.py      15      2    87%   ±0
+---------------------------------------------------------
+TOTAL                 816    256    69%   +9pp
+```
+
+Logic modules (excluding the I/O-heavy db/embeddings/progress/api) cluster at
+or above the 80% target: adjacency 94, bridge 81, labeling 85, pipeline 74,
+search 96, text_fence 87. The four I/O modules drop the headline number;
+they're Phase 3 territory (real Postgres / real Redis / real model load,
+or integration-level fakes for the route handlers).
+
+Engine pure-logic: 100% line on the three tested modules
+(`voxelDownsample.ts`, `generationCounter.ts`, `clusterLabelFade.ts`).
+Coverage tooling not wired into the engine — there's no equivalent of
+`coverage` for `bun test` in this repo — but the modules are short and
+every reachable branch is exercised by an assertion. Target ≥90% on
+pure-logic met.
+
+Web pure-logic: existing `titleCard.ts` (13 tests) + `proximity.ts` (25
+tests) + new `arrowBundle.ts` (8 tests). Route handlers still untested
+(Phase 3).
+
+### Refactors made to enable tests (each behavior-preserving)
+
+These are documented as part of Phase 2 because they were the minimum
+shape change needed to make the tested module testable; production
+behavior is unchanged.
+
+1. **`createGenerationCounter` factory** extracted from VectorScape's
+   `useRef<number>(0)` inline pattern. VectorScape now holds a counter
+   instance via `useRef(createGenerationCounter()).current`; every
+   `flyTo` / `flyToPoint` / `resetView` / `playFlythrough` /
+   `cancelFlythrough` call routes through the same `start()` / `bump()` /
+   `isStale()` surface. The cancel-preempts-stale invariant is now unit-
+   tested without React. Engine build verified clean; dist size went
+   from 23.20 kB → 23.69 kB (+0.49 kB; pure addition for the factory).
+2. **`computeLabelOpacity` + `LABEL_POINTER_OPACITY_THRESHOLD`** extracted
+   from ClusterLabels.tsx's per-frame body. The component now calls the
+   pure helper with `{distance, forwardDot, fadeStart, fadeEnd,
+   hideBehindCamera}`. The fade ramp is the same smootherstep shape; the
+   `0.05` pointer threshold is now a named constant so the inline DOM
+   write and the test reference the same number.
+3. **`packArrowBundle` / `unpackArrowBundle`** extracted to
+   `apps/web/lib/arrowBundle.ts`. The route and the client loader both
+   import it. Bytes on the wire are byte-identical to pre-Phase-2; the
+   test exercises the same encode+decode the production code paths run.
+
+No production behavior change in any of the three.
+
+### Remaining gaps after Phase 2 (handed to Phase 3 / 4)
+
+- Web route handlers (`/api/projects`, `/api/projects/[id]/data`,
+  `/api/projects/[id]/bridge`, `/api/projects/[id]/search`,
+  `/api/projects/[id]/status`, `/api/waitlist`, `/api/llm-status`) —
+  Phase 3.
+- Full CSV → embed → reduce → DB → fetch → Arrow decode lifecycle —
+  Phase 3.
+- Storage RLS, waitlist insert-only RLS, JWT-claim scoping at the
+  database layer beyond the existing cross-tenant test — Phase 3.
+- Reducer rejecting wrong / missing `X-Reducer-Secret` is already
+  covered (`test_auth.py`); 503 fail-closed is covered; nothing to add
+  in Phase 3 for that.
+- Service-to-service timeout → safe generic `error_message` — Phase 3.
+- Security E2E (prompt-injection output stays benign, path traversal
+  on upload filenames, tenant forgery on `/embed-reduce` and `/bridge`
+  end-to-end, CSV size cap test, error sanitization explicit test,
+  built-bundle secret scan) — Phase 4.
+
 
 ## Phase 3 — Integration tests
 

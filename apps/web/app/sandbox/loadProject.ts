@@ -1,6 +1,8 @@
 import { tableFromIPC, type Table } from "apache-arrow";
 import type { ClusterCentroid, ClusterEdge, PointsData } from "engine";
 
+import { unpackArrowBundle } from "../../lib/arrowBundle";
+
 export type ProjectMeta = { id: string; name: string; point_count: number };
 
 export type ClusterRow = {
@@ -189,11 +191,7 @@ type ArrowMeta = {
 
 function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
   const t0 = performance.now();
-  const view = new DataView(buf);
-  const metaLen = view.getUint32(0, true);
-  const metaBytes = new Uint8Array(buf, 4, metaLen);
-  const meta = JSON.parse(new TextDecoder().decode(metaBytes)) as ArrowMeta;
-  const arrowBytes = new Uint8Array(buf, 4 + metaLen, buf.byteLength - 4 - metaLen);
+  const { meta, arrowBytes } = unpackArrowBundle<ArrowMeta>(buf);
 
   const table = tableFromIPC(arrowBytes) as Table;
   const n = table.numRows;

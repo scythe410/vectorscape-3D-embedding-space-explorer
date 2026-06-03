@@ -1,5 +1,9 @@
 import { tableFromArrays, tableToIPC } from "apache-arrow";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  ARROW_BUNDLE_CONTENT_TYPE,
+  packArrowBundle,
+} from "@/lib/arrowBundle";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -253,27 +257,23 @@ function arrowResponseFromColumns(
     text: cols.text,
   });
   const arrowBytes = tableToIPC(table, "stream");
-
-  const metaJson = JSON.stringify({
-    project: {
-      id: project.id,
-      name: project.name,
-      point_count: cols.n,
+  const out = packArrowBundle(
+    {
+      project: {
+        id: project.id,
+        name: project.name,
+        point_count: cols.n,
+      },
+      clusters,
+      edges,
     },
-    clusters,
-    edges,
-  });
-  const metaBytes = new TextEncoder().encode(metaJson);
-
-  const out = new Uint8Array(4 + metaBytes.byteLength + arrowBytes.byteLength);
-  new DataView(out.buffer).setUint32(0, metaBytes.byteLength, true);
-  out.set(metaBytes, 4);
-  out.set(arrowBytes, 4 + metaBytes.byteLength);
+    arrowBytes,
+  );
 
   return new Response(out, {
     status: 200,
     headers: {
-      "Content-Type": "application/octet-stream; format=vs-arrow-bundle",
+      "Content-Type": ARROW_BUNDLE_CONTENT_TYPE,
       "Content-Length": String(out.byteLength),
       "Cache-Control": "no-store",
     },

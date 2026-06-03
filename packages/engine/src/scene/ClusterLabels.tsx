@@ -4,6 +4,10 @@ import { useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import type { ClusterCentroid } from "../types";
+import {
+  LABEL_POINTER_OPACITY_THRESHOLD,
+  computeLabelOpacity,
+} from "./clusterLabelFade";
 
 interface Props {
   clusters: ClusterCentroid[];
@@ -48,27 +52,23 @@ export function ClusterLabels({
       tmpVec.set(c.cx, c.cy, c.cz);
       camDelta.copy(tmpVec).sub(camera.position);
       const dist = camDelta.length();
+      const forwardDot = camDelta.dot(camForward);
 
-      // Behind-camera cull: dot of forward · (cluster - camera) < 0 → behind.
-      const behind = hideBehindCamera && camDelta.dot(camForward) < 0;
+      const t = computeLabelOpacity({
+        distance: dist,
+        forwardDot,
+        fadeStart,
+        fadeEnd,
+        hideBehindCamera,
+      });
 
-      // fadeStart > fadeEnd: 1.0 at <= fadeEnd, 0.0 at >= fadeStart, smooth between.
-      let t = 0;
-      if (!behind) {
-        if (dist <= fadeEnd) t = 1;
-        else if (dist >= fadeStart) t = 0;
-        else {
-          const u = (fadeStart - dist) / (fadeStart - fadeEnd);
-          // Smootherstep — easier on the eye than linear.
-          t = u * u * (3 - 2 * u);
-        }
-      }
       // Setting style.opacity (instead of removing the node) keeps the DOM
       // measurement cheap; drei's <Html> still computes screen-space transform.
       node.style.opacity = t.toFixed(3);
       // Avoid pointer events when invisible so labels don't intercept clicks
       // for clusters the user can't actually see.
-      node.style.pointerEvents = t > 0.05 ? "auto" : "none";
+      node.style.pointerEvents =
+        t > LABEL_POINTER_OPACITY_THRESHOLD ? "auto" : "none";
     }
   });
 

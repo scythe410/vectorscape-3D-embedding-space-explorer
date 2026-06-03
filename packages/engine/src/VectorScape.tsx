@@ -21,6 +21,7 @@ import { ClusterLabels } from "./scene/ClusterLabels";
 import { FlyToTargets, type FlyToTargetsHandle } from "./scene/FlyToTargets";
 import { PointPicker } from "./scene/PointPicker";
 import { PointsCloud } from "./scene/PointsCloud";
+import { createGenerationCounter } from "./sequencer/generationCounter";
 import type {
   ClusterCentroid,
   ClusterEdge,
@@ -360,8 +361,9 @@ function SceneController({
   const { camera } = useThree();
   // Monotonic counter — every cancel/new play bumps it; in-flight loops bail
   // when they see a stale id. Cleaner than threading AbortControllers through
-  // a Promise chain.
-  const flythroughGenRef = useRef(0);
+  // a Promise chain. Backed by a pure factory (see sequencer/generationCounter)
+  // so the cancel-preempts-stale contract is unit-tested without React.
+  const flythroughGen = useRef(createGenerationCounter()).current;
   // Capture onReady in a ref so the mount effect's empty-deps closure never
   // calls a stale callback if the host re-renders with a new function.
   const onReadyRef = useRef(onReady);
@@ -405,7 +407,7 @@ function SceneController({
     handleRef,
     () => ({
       flyTo: (id) => {
-        flythroughGenRef.current++;
+        flythroughGen.bump();
         const controls = controlsRef.current;
         if (!controls) return;
         // Drive framing from the cluster data directly instead of the invisible
@@ -432,7 +434,7 @@ function SceneController({
         });
       },
       flyToPoint: (position, radius = 3) => {
-        flythroughGenRef.current++;
+        flythroughGen.bump();
         const controls = controlsRef.current;
         if (!controls) return;
         controls.stop();
@@ -449,7 +451,7 @@ function SceneController({
         });
       },
       resetView: () => {
-        flythroughGenRef.current++;
+        flythroughGen.bump();
         controlsRef.current?.reset(true);
         camera.position.set(0, 0, 60);
       },
@@ -469,15 +471,15 @@ function SceneController({
       playFlythrough: async (keyframes, options) => {
         const controls = controlsRef.current;
         if (!controls || keyframes.length === 0) return;
-        const myGen = ++flythroughGenRef.current;
+        const myGen = flythroughGen.start();
         const defaultSmooth = controls.smoothTime;
         try {
           if (options?.initialHoldMs && options.initialHoldMs > 0) {
             await new Promise((r) => setTimeout(r, options.initialHoldMs));
-            if (flythroughGenRef.current !== myGen) return;
+            if (flythroughGen.isStale(myGen)) return;
           }
           for (const kf of keyframes) {
-            if (flythroughGenRef.current !== myGen) return;
+            if (flythroughGen.isStale(myGen)) return;
             if (kf.smoothTime != null) controls.smoothTime = kf.smoothTime;
             await controls.setLookAt(
               kf.position[0],
@@ -488,7 +490,7 @@ function SceneController({
               kf.target[2],
               true,
             );
-            if (flythroughGenRef.current !== myGen) return;
+            if (flythroughGen.isStale(myGen)) return;
             if (kf.holdMs && kf.holdMs > 0) {
               await new Promise((r) => setTimeout(r, kf.holdMs));
             }
@@ -498,7 +500,7 @@ function SceneController({
         }
       },
       cancelFlythrough: () => {
-        flythroughGenRef.current++;
+        flythroughGen.bump();
       },
     }),
     [camera],
