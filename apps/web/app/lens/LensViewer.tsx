@@ -9,6 +9,7 @@ import {
 import { folder, LevaPanel, useControls, useCreateStore } from "leva";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import RegionTitleCard from "../components/RegionTitleCard";
 import {
   clusterColor,
   loadProjectFromUrl,
@@ -59,6 +60,8 @@ export default function LensViewer() {
   const [hqMode, setHqMode] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [constellationsOpen, setConstellationsOpen] = useState(false);
+  const [rendererReady, setRendererReady] = useState(false);
+  const [titleCardDone, setTitleCardDone] = useState(false);
   const handleRef = useRef<VectorScapeHandle | null>(null);
   const startedRef = useRef(false);
 
@@ -121,10 +124,15 @@ export default function LensViewer() {
   }, []);
 
   // VectorScape calls this once after its camera controls are wired and the
-  // initial pose is applied. Driving the cinematic from this callback (instead
-  // of a setTimeout race against Canvas mount) means there's no window where
-  // the camera sits at a default pose before the intro starts.
+  // initial pose is applied. We only flip a flag here — the actual flythrough
+  // is gated on both the renderer being ready AND the title card being done
+  // dissolving, so the dive begins exactly when the card hands off.
   const handleRendererReady = useCallback(() => {
+    setRendererReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!rendererReady || !titleCardDone) return;
     if (startedRef.current) return;
     startedRef.current = true;
     const h = handleRef.current;
@@ -137,7 +145,7 @@ export default function LensViewer() {
     void h
       .playFlythrough(FLYTHROUGH, { initialHoldMs: INTRO_HOLD_MS })
       .finally(() => setFlythroughRunning(false));
-  }, []);
+  }, [rendererReady, titleCardDone]);
 
   const skip = () => {
     handleRef.current?.cancelFlythrough();
@@ -191,6 +199,19 @@ export default function LensViewer() {
           handleRef.current?.flyTo(id);
         }}
         onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
+      />
+
+      {/*
+        Documentary title card — names the top regions before the camera dives
+        in. Shown once per session per scope; dissolves into the flythrough.
+      */}
+      <RegionTitleCard
+        clusters={loaded.clusters}
+        scope="lens-skm"
+        title={loaded.project.name}
+        subtitle={`${loaded.totalPoints.toLocaleString()} documents · ${loaded.clusters.length} regions`}
+        topN={8}
+        onComplete={() => setTitleCardDone(true)}
       />
 
       {/*

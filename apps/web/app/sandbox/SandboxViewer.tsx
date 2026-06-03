@@ -3,6 +3,7 @@
 import { VectorScape, type PointsData, type VectorScapeHandle } from "engine";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import RegionTitleCard from "../components/RegionTitleCard";
 import BridgePanel from "./BridgePanel";
 import SearchPanel, { type SearchResult } from "./SearchPanel";
 import { clusterColor, loadProject, type LoadedProject } from "./loadProject";
@@ -222,6 +223,18 @@ export default function SandboxViewer({ projectId }: Props) {
           onClusterSelect={onClusterPick}
           onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
           showClusterLabels
+        />
+        {/* Title card: names the top regions on first load of this project,
+            then dissolves into the live galaxy. Once per session per project. */}
+        <RegionTitleCard
+          clusters={loaded.clusters}
+          scope={`sandbox-${projectId}`}
+          title={loaded.project.name}
+          subtitle={`${loaded.totalPoints.toLocaleString()} documents · ${loaded.clusters.length} regions`}
+          topN={8}
+          onComplete={() => {
+            /* sandbox has no flythrough — the card just dissolves into the live galaxy. */
+          }}
         />
         <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-black/50 px-2 py-1 text-xs text-neutral-300 backdrop-blur">
           {loaded.project.name} · {loaded.totalPoints.toLocaleString()} points ·{" "}
