@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import Papa from "papaparse";
 import { ReducerConfigError, reducerHeaders, reducerUrl, REDUCER_URL } from "@/lib/reducer";
+import { safeName } from "@/lib/safeName";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -14,12 +15,6 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
 
 function bad(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
-}
-
-/** Sanitize a filename for use as a Storage object path component. */
-function safeName(name: string): string {
-  const base = name.split(/[\\/]/).pop() || "upload.csv";
-  return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120) || "upload.csv";
 }
 
 export async function POST(request: NextRequest) {
