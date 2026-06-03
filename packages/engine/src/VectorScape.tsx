@@ -1,5 +1,5 @@
 import { CameraControls } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   Bloom,
   DepthOfField,
@@ -114,6 +114,14 @@ export interface VectorScapeProps {
    * moves without racing the Canvas mount via setTimeout.
    */
   onReady?: () => void;
+  /**
+   * Fires with the camera's world-space position on (effectively) every frame
+   * while the camera is in motion. The engine emits unthrottled — hosts that
+   * setState on this should throttle themselves (see `lib/proximity.ts`
+   * `createThrottle`). When the camera is at rest, emissions stop until it
+   * moves again, so an idle galaxy doesn't keep the host's React tree busy.
+   */
+  onCameraMove?: (position: [number, number, number]) => void;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -174,6 +182,7 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
       onStats,
       initialPose = DEFAULT_INITIAL_POSE,
       onReady,
+      onCameraMove,
       className,
       style,
     },
@@ -242,6 +251,8 @@ export const VectorScape = forwardRef<VectorScapeHandle, VectorScapeProps>(
             initialPose={initialPose}
             onReady={onReady}
           />
+
+          {onCameraMove && <CameraReporter onMove={onCameraMove} />}
 
           {showClusterLabels && clusters.length > 0 && (
             <ClusterLabels clusters={clusters} />
@@ -500,4 +511,41 @@ function SceneController({
       <FlyToTargets ref={targetsRef} clusters={clusters} onPick={onClusterSelect} />
     </>
   );
+}
+
+/**
+ * Emits the camera's world-space position to the host on every frame *that the
+ * camera has actually moved*. Idle frames are skipped (no React state churn,
+ * no per-frame allocation past a single Float32 comparison) so the proximity
+ * readout settles cleanly when the user stops flying.
+ *
+ * The host is responsible for throttling its setState — see `createThrottle`
+ * in apps/web/lib/proximity.ts. We intentionally don't throttle inside the
+ * engine so different surfaces can pick their own cadence.
+ */
+function CameraReporter({
+  onMove,
+}: {
+  onMove: (pos: [number, number, number]) => void;
+}) {
+  const { camera } = useThree();
+  // Latest callback in a ref so a host re-render with a new closure doesn't
+  // require remounting this component.
+  const onMoveRef = useRef(onMove);
+  onMoveRef.current = onMove;
+  // Track the last emitted position so we can early-out on idle frames. 0.001
+  // world units is well below any visible motion at the 350k-point budget.
+  const lastRef = useRef<[number, number, number]>([NaN, NaN, NaN]);
+  useFrame(() => {
+    const x = camera.position.x;
+    const y = camera.position.y;
+    const z = camera.position.z;
+    const [lx, ly, lz] = lastRef.current;
+    if (Math.abs(x - lx) < 0.001 && Math.abs(y - ly) < 0.001 && Math.abs(z - lz) < 0.001) {
+      return;
+    }
+    lastRef.current = [x, y, z];
+    onMoveRef.current([x, y, z]);
+  });
+  return null;
 }

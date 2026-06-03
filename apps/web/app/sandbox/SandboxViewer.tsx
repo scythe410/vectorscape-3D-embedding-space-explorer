@@ -3,7 +3,9 @@
 import { VectorScape, type PointsData, type VectorScapeHandle } from "engine";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import ProximityReadout, { useTrackedCamera } from "../components/ProximityReadout";
 import RegionTitleCard from "../components/RegionTitleCard";
+import type { ProximityCentroid } from "../../lib/proximity";
 import BridgePanel from "./BridgePanel";
 import SearchPanel, { type SearchResult } from "./SearchPanel";
 import { clusterColor, loadProject, type LoadedProject } from "./loadProject";
@@ -40,6 +42,21 @@ export default function SandboxViewer({ projectId }: Props) {
   const [hqMode, setHqMode] = useState(false);
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const handleRef = useRef<VectorScapeHandle | null>(null);
+  const { cameraPos, onCameraMove } = useTrackedCamera(120);
+
+  const proximityCentroids: ProximityCentroid[] = useMemo(
+    () =>
+      loaded
+        ? loaded.centroids.map((c) => ({
+            id: c.id,
+            label: c.label ?? `Cluster ${c.id}`,
+            cx: c.cx,
+            cy: c.cy,
+            cz: c.cz,
+          }))
+        : [],
+    [loaded],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -222,7 +239,15 @@ export default function SandboxViewer({ projectId }: Props) {
           minBrightness={searchOverride ? SEARCH_MIN_BRIGHTNESS : undefined}
           onClusterSelect={onClusterPick}
           onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
+          onCameraMove={onCameraMove}
           showClusterLabels
+        />
+        {/* Live proximity readout — shows the top 2-3 regions the camera is
+            "between" right now, fades when settled inside one cluster. */}
+        <ProximityReadout
+          cameraPos={cameraPos}
+          centroids={proximityCentroids}
+          position="bottom-center"
         />
         {/* Title card: names the top regions on first load of this project,
             then dissolves into the live galaxy. Once per session per project. */}

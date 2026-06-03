@@ -7,14 +7,16 @@ import {
   type VectorScapeHandle,
 } from "engine";
 import { folder, LevaPanel, useControls, useCreateStore } from "leva";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import ProximityReadout, { useTrackedCamera } from "../components/ProximityReadout";
 import RegionTitleCard from "../components/RegionTitleCard";
 import {
   clusterColor,
   loadProjectFromUrl,
   type LoadedProject,
 } from "../sandbox/loadProject";
+import type { ProximityCentroid } from "../../lib/proximity";
 
 const DEMO_URL = "/demo/skm-galaxy.json";
 
@@ -64,6 +66,21 @@ export default function LensViewer() {
   const [titleCardDone, setTitleCardDone] = useState(false);
   const handleRef = useRef<VectorScapeHandle | null>(null);
   const startedRef = useRef(false);
+  const { cameraPos, onCameraMove } = useTrackedCamera(120);
+
+  const proximityCentroids: ProximityCentroid[] = useMemo(
+    () =>
+      loaded
+        ? loaded.centroids.map((c) => ({
+            id: c.id,
+            label: c.label ?? `Cluster ${c.id}`,
+            cx: c.cx,
+            cy: c.cy,
+            cz: c.cz,
+          }))
+        : [],
+    [loaded],
+  );
 
   // Local Leva store. Routing useControls through this keeps Leva's global
   // store empty, which prevents `useControls` from auto-injecting a default
@@ -199,7 +216,19 @@ export default function LensViewer() {
           handleRef.current?.flyTo(id);
         }}
         onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
+        onCameraMove={onCameraMove}
       />
+
+      {/* Live "where am I, relative to which regions" readout. Hidden during
+          the intro cinematic — the title card and flythrough own the screen
+          there — and once the camera is steady inside one cluster. */}
+      {!flythroughRunning && (
+        <ProximityReadout
+          cameraPos={cameraPos}
+          centroids={proximityCentroids}
+          position="bottom-center"
+        />
+      )}
 
       {/*
         Documentary title card — names the top regions before the camera dives
