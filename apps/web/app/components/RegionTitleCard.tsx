@@ -54,7 +54,7 @@ export default function RegionTitleCard({
   title,
   subtitle,
   topN = 8,
-  holdMs = 2200,
+  holdMs = 5000,
   fadeMs = 500,
   onComplete,
 }: Props) {
@@ -72,6 +72,12 @@ export default function RegionTitleCard({
   const [phase, setPhase] = useState<"hidden" | "shown" | "dissolving">(
     decision === "show" ? "hidden" : "hidden",
   );
+  // Once true the component returns null — fully unmounts so the invisible
+  // overlay can't block pointer events on the canvas beneath.
+  const [done, setDone] = useState(false);
+  // Countdown seconds shown on the enter button — ticks from ceil(holdMs/1000)
+  // down to 0, giving the card a cinematic "launching in N" feel.
+  const [countdown, setCountdown] = useState(Math.ceil(holdMs / 1000));
 
   // Guard against double-fire: the auto-dissolve timer and a user skip can
   // race. Whoever lands first wins; the other is a no-op.
@@ -80,6 +86,7 @@ export default function RegionTitleCard({
     if (completedRef.current) return;
     completedRef.current = true;
     onComplete();
+    setDone(true);
   };
 
   const top = useMemo(() => selectTopClusters(clusters, topN), [clusters, topN]);
@@ -112,7 +119,16 @@ export default function RegionTitleCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decision, scope, holdMs, fadeMs]);
 
-  if (decision === "skip") return null;
+  // Tick the countdown every second while the card is visible.
+  useEffect(() => {
+    if (phase !== "shown") return;
+    const id = setInterval(() => {
+      setCountdown((c) => (c > 0 ? c - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [phase]);
+
+  if (decision === "skip" || done) return null;
 
   const visible = phase === "shown";
   const dissolving = phase === "dissolving";
@@ -213,7 +229,7 @@ export default function RegionTitleCard({
           className="mt-10 rounded-full border border-white/15 bg-black/40 px-5 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-neutral-300 backdrop-blur-md transition hover:border-amber-300/60 hover:text-amber-200"
           aria-label="Skip overview"
         >
-          enter ↵
+          enter{countdown > 0 ? ` ${countdown}` : ""} ↵
         </button>
       </div>
     </div>
