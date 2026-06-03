@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 import type { ClusterCentroid, ClusterPickOptions } from "../types";
@@ -33,6 +33,15 @@ export const FlyToTargets = forwardRef<FlyToTargetsHandle, Props>(function FlyTo
   );
 
   const sphereGeom = useMemo(() => new THREE.SphereGeometry(1, 12, 8), []);
+
+  // Free the GPU buffer on unmount. Mirrors PointsCloud's dispose pattern;
+  // without it, every VectorScape mount/unmount leaks one sphere geometry
+  // until full V8 GC.
+  useEffect(() => {
+    return () => {
+      sphereGeom.dispose();
+    };
+  }, [sphereGeom]);
 
   return (
     <group>

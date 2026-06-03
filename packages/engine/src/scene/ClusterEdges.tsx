@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 import type { ClusterCentroid, ClusterEdge } from "../types";
@@ -46,6 +46,15 @@ export function ClusterEdges({ edges, centroids, onEdgeHover, onEdgeClick }: Pro
     () => new THREE.CylinderGeometry(1, 1, 1, 8, 1, true),
     [],
   );
+
+  // Free the GPU buffer on unmount. Without this, navigating between routes
+  // (e.g. /lens → /sandbox) or HMR re-mounts leak the cylinder until V8 GC
+  // of the whole scene graph. Mirrors PointsCloud's dispose pattern.
+  useEffect(() => {
+    return () => {
+      cylinderGeom.dispose();
+    };
+  }, [cylinderGeom]);
 
   // Up vector for the cylinder's default orientation. Rotated to align with
   // each edge segment via `setFromUnitVectors`.
