@@ -357,26 +357,26 @@ export default function CinematicGalaxy({
       />
 
       {controlsOpen && !flythroughRunning && (
-        <div className="absolute bottom-6 right-[19.5rem] z-50 w-[300px] overflow-hidden rounded-lg border border-amber-300/20 bg-black/55 shadow-[0_0_30px_-12px_rgba(252,211,77,0.25)] backdrop-blur-md">
+        <div className="vs-tune-panel absolute bottom-6 right-[19.5rem] z-50 w-[300px] overflow-hidden rounded-lg">
           <LevaPanel
             store={levaStore}
             fill
             flat
-            titleBar={{ title: "feel", filter: true, drag: false }}
+            titleBar={{ title: "feel", filter: false, drag: false }}
             theme={{
               colors: {
                 elevation1: "rgba(0,0,0,0)",
-                elevation2: "rgba(0,0,0,0.35)",
-                elevation3: "rgba(255,255,255,0.04)",
+                elevation2: "rgba(0,0,0,0)",
+                elevation3: "rgba(255,255,255,0.03)",
                 accent1: "#fcd34d",
                 accent2: "#fbbf24",
                 accent3: "#f59e0b",
-                highlight1: "rgba(255,255,255,0.5)",
+                highlight1: "rgba(255,255,255,0.45)",
                 highlight2: "rgba(252,211,77,0.85)",
                 highlight3: "#fde68a",
                 vivid1: "#fcd34d",
-                folderWidgetColor: "rgba(252,211,77,0.7)",
-                folderTextColor: "rgba(252,211,77,0.9)",
+                folderWidgetColor: "rgba(252,211,77,0.75)",
+                folderTextColor: "rgba(253,230,138,0.95)",
                 toolTipBackground: "rgba(0,0,0,0.85)",
                 toolTipText: "#fde68a",
               },
@@ -391,19 +391,26 @@ export default function CinematicGalaxy({
               sizes: {
                 rootWidth: "300px",
                 controlWidth: "150px",
-                titleBarHeight: "32px",
-                rowHeight: "26px",
+                titleBarHeight: "36px",
+                rowHeight: "28px",
+                checkboxSize: "16px",
+                scrubberWidth: "10px",
+                scrubberHeight: "14px",
               },
               radii: {
                 xs: "2px",
-                sm: "4px",
-                lg: "6px",
+                sm: "9999px",
+                lg: "8px",
               },
               space: {
                 sm: "6px",
-                md: "8px",
-                rowGap: "6px",
-                colGap: "6px",
+                md: "10px",
+                rowGap: "8px",
+                colGap: "8px",
+              },
+              shadows: {
+                level1: "0 0 0 1px rgba(252,211,77,0.18)",
+                level2: "0 0 8px rgba(252,211,77,0.35)",
               },
             }}
           />

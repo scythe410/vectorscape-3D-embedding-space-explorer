@@ -73,3 +73,152 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .wiggle-dot { animation: none; opacity: 0.85; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Tune-feel (Leva) panel — restyle Leva's default chrome to match the
+   constellation-rail glass aesthetic: warm amber accents, capsule-like
+   value pills, glowing scrubbers, and clearly visible checkboxes.
+   ───────────────────────────────────────────────────────────────────── */
+.vs-tune-panel {
+  background:
+    radial-gradient(ellipse at 50% -20%, rgba(252, 211, 77, 0.10), transparent 55%),
+    radial-gradient(ellipse at 50% 120%, rgba(180, 120, 60, 0.06), transparent 60%),
+    linear-gradient(180deg, rgba(12, 10, 6, 0.62) 0%, rgba(6, 7, 10, 0.72) 100%);
+  border: 1px solid rgba(252, 211, 77, 0.22);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 0 1px rgba(252, 211, 77, 0.04),
+    0 14px 44px -14px rgba(0, 0, 0, 0.65),
+    0 0 28px -10px rgba(252, 211, 77, 0.22);
+}
+
+/* Title bar — match constellation header (uppercase, wide tracking). */
+.vs-tune-panel [class*="StyledTitleWithFilter"] {
+  border-bottom: 1px solid rgba(252, 211, 77, 0.10);
+  background: linear-gradient(180deg, rgba(252, 211, 77, 0.04), transparent);
+}
+.vs-tune-panel [class*="TitleContainer"] {
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 10px;
+  color: rgba(253, 230, 138, 0.85);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Collapse caret on the left of the title bar — soften into a pill. */
+.vs-tune-panel [class*="StyledTitleWithFilter"] > [class*="Icon"] {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  transition: border-color 200ms, background-color 200ms;
+}
+.vs-tune-panel [class*="StyledTitleWithFilter"] > [class*="Icon"]:hover {
+  border-color: rgba(252, 211, 77, 0.55);
+  background: rgba(252, 211, 77, 0.10);
+}
+.vs-tune-panel [class*="StyledTitleWithFilter"] > [class*="Icon"] svg {
+  fill: rgba(253, 230, 138, 0.8);
+}
+
+/* Row labels — soft amber-tinted neutral, monospace for that telemetry feel. */
+.vs-tune-panel [class*="StyledLabel"] {
+  color: rgba(229, 231, 235, 0.78);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+
+/* Folder headers ("sprite", "effects") styled like the Constellations header. */
+.vs-tune-panel [class*="StyledTitle"] {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  color: rgba(253, 230, 138, 0.85) !important;
+}
+.vs-tune-panel [class*="StyledTitle"] > svg {
+  fill: rgba(252, 211, 77, 0.7) !important;
+  opacity: 0.85 !important;
+}
+
+/* ── Checkboxes ────────────────────────────────────────────────────────
+   Glass capsule with clear amber accent + dark, high-contrast checkmark.
+   Leva renders: input[type=checkbox] (hidden) + label (visible box) + svg.
+   ──────────────────────────────────────────────────────────────────── */
+.vs-tune-panel input[type="checkbox"] + label {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(252, 211, 77, 0.35) !important;
+  border-radius: 5px !important;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: background-color 160ms, border-color 160ms, box-shadow 160ms;
+}
+.vs-tune-panel input[type="checkbox"] + label:hover {
+  border-color: rgba(252, 211, 77, 0.65) !important;
+  background: rgba(252, 211, 77, 0.08) !important;
+}
+.vs-tune-panel input[type="checkbox"]:checked + label {
+  background: linear-gradient(180deg, #fde68a 0%, #fbbf24 100%) !important;
+  border-color: rgba(252, 211, 77, 0.9) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 0 10px -2px rgba(252, 211, 77, 0.6);
+}
+.vs-tune-panel input[type="checkbox"]:checked + label > svg {
+  stroke: #1a1205 !important;
+  stroke-width: 3.5 !important;
+}
+
+/* ── Range / slider track + scrubber ───────────────────────────────── */
+/* The thin track. Leva keeps it at height 2; lift it slightly and glow. */
+.vs-tune-panel [class*="RangeWrapper"] > div:first-child {
+  height: 3px !important;
+  border-radius: 9999px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: inset 0 0 0 1px rgba(252, 211, 77, 0.08);
+}
+/* Filled indicator (left of scrubber) — warm amber gradient. */
+.vs-tune-panel [class*="RangeWrapper"] [class*="Indicator"] {
+  background: linear-gradient(90deg, rgba(252, 211, 77, 0.4), #fcd34d) !important;
+  border-radius: 9999px !important;
+}
+/* The scrubber thumb — capsule, glowing. */
+.vs-tune-panel [class*="Scrubber"] {
+  border-radius: 9999px !important;
+  background: linear-gradient(180deg, #fde68a, #fbbf24) !important;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 10px -1px rgba(252, 211, 77, 0.65) !important;
+}
+
+/* ── Value input boxes (the right-hand "3.0", "0.00", "1.20" pills) ── */
+.vs-tune-panel [class*="InputContainer"] {
+  background: rgba(0, 0, 0, 0.35) !important;
+  border: 1px solid rgba(252, 211, 77, 0.18) !important;
+  border-radius: 9999px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  transition: border-color 160ms, box-shadow 160ms;
+}
+.vs-tune-panel [class*="InputContainer"]:hover {
+  border-color: rgba(252, 211, 77, 0.4) !important;
+}
+.vs-tune-panel [class*="InputContainer"]:focus-within {
+  border-color: rgba(252, 211, 77, 0.7) !important;
+  box-shadow: 0 0 0 2px rgba(252, 211, 77, 0.15);
+}
+.vs-tune-panel [class*="InputContainer"] input {
+  color: #fde68a !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  text-align: center !important;
+  padding: 0 8px !important;
+}
+
+/* Folder side rail — turn Leva's bright amber bar into a soft trail. */
+.vs-tune-panel [class*="StyledWrapper"]::after {
+  background-color: rgba(252, 211, 77, 0.25) !important;
+  opacity: 0.5 !important;
+}
