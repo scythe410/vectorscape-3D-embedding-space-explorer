@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import Papa from "papaparse";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { safeName } from "@/lib/safeName";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 // The viewer mounts an R3F <Canvas>, which requires `window`. ssr:false keeps
 // it out of the server bundle and avoids a hydration mismatch on first paint.
@@ -199,11 +201,43 @@ export default function SandboxUI() {
     setSubmitting(true);
     setSubmitError(undefined);
     try {
-      const fd = new FormData();
-      fd.append("file", preview.file);
-      fd.append("text_column", textColumn);
-      fd.append("name", projectName || preview.file.name);
-      const r = await fetch("/api/projects", { method: "POST", body: fd });
+      // Upload the CSV straight to Supabase Storage from the browser. Vercel's
+      // serverless functions cap inbound request bodies at ~4.5 MB; sending the
+      // raw multipart through /api/projects fails at the edge before our code
+      // ever runs and surfaces as "Failed to fetch". Storage has no such cap,
+      // and the storage RLS policy already pins uploads to <auth.uid()>/... so
+      // the browser-side upload is authorised correctly. The API route then
+      // receives only a small JSON pointer and reads the bytes from Storage.
+      const supabase = createSupabaseBrowserClient();
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData.user) {
+        setSubmitError("not authenticated");
+        return;
+      }
+      const userId = userData.user.id;
+      const pid = crypto.randomUUID();
+      const fileName = safeName(preview.file.name);
+      const objectPath = `${userId}/${pid}/${fileName}`;
+
+      const up = await supabase.storage
+        .from("csv-uploads")
+        .upload(objectPath, preview.file, { contentType: "text/csv", upsert: false });
+      if (up.error) {
+        setSubmitError(`storage upload failed: ${up.error.message}`);
+        return;
+      }
+
+      const r = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: pid,
+          storage_path: objectPath,
+          file_name: fileName,
+          text_column: textColumn,
+          name: projectName || preview.file.name,
+        }),
+      });
       // The route always sends JSON on the happy path, but Next can emit an
       // empty 500 body when an unhandled error bubbles. Read text first so we
       // can surface the status code instead of "Unexpected end of JSON input".
@@ -217,15 +251,16 @@ export default function SandboxUI() {
         }
       }
       if (!r.ok || !body.project_id) {
+        // Roll back the uploaded object so retries don't accumulate orphans.
+        await supabase.storage.from("csv-uploads").remove([objectPath]);
         setSubmitError(
           body.error || `upload failed (${r.status}${raw ? "" : ", empty response"})`,
         );
         return;
       }
-      const pid = body.project_id;
-      setProjectId(pid);
+      setProjectId(body.project_id);
       setStatus({
-        project_id: pid,
+        project_id: body.project_id,
         status: "pending",
         point_count: 0,
         error_message: null,
