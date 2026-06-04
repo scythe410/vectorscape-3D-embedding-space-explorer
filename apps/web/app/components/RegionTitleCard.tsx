@@ -54,7 +54,7 @@ export default function RegionTitleCard({
   title,
   subtitle,
   topN = 8,
-  holdMs = 10000,
+  holdMs = 9000,
   fadeMs = 500,
   onComplete,
 }: Props) {
