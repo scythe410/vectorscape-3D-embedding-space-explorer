@@ -30,6 +30,12 @@ REDUCER_SHARED_SECRET = os.environ.get("REDUCER_SHARED_SECRET", "").strip()
 # sync path when the worker isn't available.
 ASYNC_ROW_THRESHOLD = int(os.environ.get("REDUCER_ASYNC_THRESHOLD", "0"))
 
+# When truthy, the /embed-reduce endpoint enqueues jobs via arq (requires
+# Redis + a running arq worker). When falsy (the default), jobs run in an
+# in-process background asyncio task — no Redis needed. The in-process
+# mode is ideal for single-instance deployments like HF Spaces.
+USE_ARQ = bool(os.environ.get("REDUCER_USE_ARQ", "").strip())
+
 CACHE_DIR = Path(
     os.environ.get("REDUCER_CACHE_DIR", str(Path.home() / ".cache" / "vectorscape" / "embeddings"))
 )

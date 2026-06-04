@@ -144,6 +144,10 @@ export async function POST(request: NextRequest) {
         name,
         reducer,
       }),
+      // Safety net: the reducer should return in <1s with mode:"queued",
+      // but if the HF Space is cold-starting or unresponsive, bail before
+      // Vercel's own function timeout kills us with a generic 504.
+      signal: AbortSignal.timeout(15_000),
     });
   } catch (e) {
     await supabase
@@ -152,6 +156,13 @@ export async function POST(request: NextRequest) {
       .eq("id", projectId);
     if (e instanceof ReducerConfigError) {
       return bad(e.message, 500);
+    }
+    // Distinguish timeout from connection refused for a better error message.
+    if (e instanceof DOMException && e.name === "TimeoutError") {
+      return bad(
+        "reducer did not respond within 15 s — the HF Space may be cold-starting. Please retry in a minute.",
+        504,
+      );
     }
     const msg = e instanceof Error ? e.message : String(e);
     return bad(

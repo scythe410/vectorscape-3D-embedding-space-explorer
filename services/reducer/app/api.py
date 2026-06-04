@@ -1,21 +1,22 @@
 """FastAPI routes: /embed-reduce, /status/{project_id}.
 
-By default every request is handed to the arq worker so the API returns
-in ms and the caller polls /status. Set REDUCER_ASYNC_THRESHOLD above 0
-to opt rows at/under that count back into the inline sync path.
+By default every request is handed to an in-process background task so the
+API returns in ms and the caller polls /status. Set REDUCER_USE_ARQ=1 to
+switch to the arq worker (requires Redis). Set REDUCER_ASYNC_THRESHOLD
+above 0 to opt rows at/under that count back into the inline sync path.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any, Literal
 
 import anyio
-from arq import create_pool
-from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .auth import verify_reducer_secret
-from .config import ASYNC_ROW_THRESHOLD, DEFAULT_EMBED_MODEL, DEFAULT_REDUCER, REDIS_URL
+from .config import ASYNC_ROW_THRESHOLD, DEFAULT_EMBED_MODEL, DEFAULT_REDUCER, REDIS_URL, USE_ARQ
 from .db import (
     connect,
     ensure_project,
@@ -28,6 +29,8 @@ from .db import (
 from .labeling import label_clusters
 from .pipeline import run_pipeline
 from .progress import get_progress
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -79,6 +82,39 @@ def _extract_texts(req: EmbedReduceRequest) -> list[str]:
     return texts
 
 
+async def _run_pipeline_background(
+    pid: str, tid: str, texts: list[str], embed_model: str, reducer: str
+) -> None:
+    """Run the full embed→reduce→cluster pipeline in a background thread.
+
+    Status transitions: pending → reducing → ready, or → error with
+    error_message on failure. This runs inside an asyncio.Task so the
+    calling endpoint returns immediately.
+    """
+    def _work() -> None:
+        with connect() as conn:
+            set_status(conn, pid, "reducing")
+            result = run_pipeline(texts, embed_model=embed_model, reducer=reducer)
+            write_results(conn, project_id=pid, tenant_id=tid, texts=texts, result=result)
+
+    try:
+        await anyio.to_thread.run_sync(_work)
+    except Exception:
+        _log.exception("background pipeline failed for project %s", pid)
+        try:
+            def _record_error() -> None:
+                with connect() as err_conn:
+                    set_status(
+                        err_conn,
+                        pid,
+                        "error",
+                        error_message="Reduction failed. Check the reducer service logs for details.",
+                    )
+            await anyio.to_thread.run_sync(_record_error)
+        except Exception:
+            _log.exception("failed to record error status for project %s", pid)
+
+
 @router.post(
     "/embed-reduce",
     response_model=EmbedReduceResponse,
@@ -103,19 +139,29 @@ async def embed_reduce(req: EmbedReduceRequest) -> EmbedReduceResponse:
         set_status(conn, pid, "pending")
 
     if len(texts) > ASYNC_ROW_THRESHOLD:
-        # Hand off to arq. The job sets reducing/ready/error itself.
-        pool = await create_pool(RedisSettings.from_dsn(REDIS_URL))
-        try:
-            await pool.enqueue_job(
-                "embed_reduce_job",
-                project_id=pid,
-                tenant_id=tid,
-                texts=texts,
-                embed_model=req.embed_model,
-                reducer=req.reducer,
+        if USE_ARQ:
+            # arq/Redis path — only when explicitly opted in.
+            from arq import create_pool
+            from arq.connections import RedisSettings
+
+            pool = await create_pool(RedisSettings.from_dsn(REDIS_URL))
+            try:
+                await pool.enqueue_job(
+                    "embed_reduce_job",
+                    project_id=pid,
+                    tenant_id=tid,
+                    texts=texts,
+                    embed_model=req.embed_model,
+                    reducer=req.reducer,
+                )
+            finally:
+                await pool.close()
+        else:
+            # In-process background task — no Redis required.
+            asyncio.get_event_loop().create_task(
+                _run_pipeline_background(pid, tid, texts, req.embed_model, req.reducer)
             )
-        finally:
-            await pool.close()
+
         return EmbedReduceResponse(
             project_id=pid,
             tenant_id=tid,
@@ -149,8 +195,7 @@ async def embed_reduce(req: EmbedReduceRequest) -> EmbedReduceResponse:
         # commit independently — otherwise status stays at 'pending'.
         # User-facing error_message is generic (QA-6); the raw exception is
         # logged to the reducer's stderr.
-        import logging
-        logging.exception("embed_reduce sync path failed for project %s", pid)
+        _log.exception("embed_reduce sync path failed for project %s", pid)
 
         def _record_error() -> None:
             with connect() as err_conn:
