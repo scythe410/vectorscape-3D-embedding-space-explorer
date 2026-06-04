@@ -16,7 +16,16 @@ from pydantic import BaseModel, Field
 
 from .auth import verify_reducer_secret
 from .config import ASYNC_ROW_THRESHOLD, DEFAULT_EMBED_MODEL, DEFAULT_REDUCER, REDIS_URL
-from .db import connect, ensure_project, fetch_status, set_status, write_results
+from .db import (
+    connect,
+    ensure_project,
+    fetch_points_for_labeling,
+    fetch_status,
+    set_status,
+    update_cluster_labels,
+    write_results,
+)
+from .labeling import label_clusters
 from .pipeline import run_pipeline
 from .progress import get_progress
 
@@ -159,6 +168,50 @@ async def embed_reduce(req: EmbedReduceRequest) -> EmbedReduceResponse:
         ) from e
 
     return EmbedReduceResponse(**summary, mode="sync")
+
+
+class RelabelResponse(BaseModel):
+    project_id: str
+    n_clusters: int
+    n_updated: int
+    labels: dict[int, str]
+
+
+@router.post(
+    "/relabel/{project_id}",
+    response_model=RelabelResponse,
+    dependencies=[Depends(verify_reducer_secret)],
+)
+async def relabel(project_id: str) -> RelabelResponse:
+    """Recompute cluster labels for an existing project without re-embedding.
+
+    Pulls texts + cluster_ids straight from the points table, runs the
+    free c-TF-IDF (and optional LLM upgrade) labeler, and writes the result
+    back to clusters.label. Used to repair projects whose labels were
+    persisted as 'Cluster N' placeholders by an older reducer build.
+    """
+
+    def _do_work() -> tuple[int, int, dict[int, str]]:
+        with connect() as conn:
+            texts, cluster_ids, snippets = fetch_points_for_labeling(conn, project_id)
+            if not texts:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"project {project_id} has no points (or does not exist)",
+                )
+            labels = label_clusters(
+                texts, cluster_ids, medoid_snippets_by_cluster=snippets or None
+            )
+            updated = update_cluster_labels(conn, project_id, labels)
+            return len(labels), updated, labels
+
+    n_clusters, n_updated, labels = await anyio.to_thread.run_sync(_do_work)
+    return RelabelResponse(
+        project_id=project_id,
+        n_clusters=n_clusters,
+        n_updated=n_updated,
+        labels=labels,
+    )
 
 
 @router.get(

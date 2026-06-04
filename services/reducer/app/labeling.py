@@ -33,6 +33,7 @@ LABEL_LLM_MODEL = "gpt-4o-mini"
 
 _LEAD_LABEL_RE = re.compile(r"^(label|topic|title|name)\s*[:\-]\s*", re.IGNORECASE)
 _TRAIL_PUNCT = ".,;:!?-—–\"'`"
+_WORDLIKE_RE = re.compile(r"\S+")
 
 
 def _texts_by_cluster(texts: list[str], cluster_ids: np.ndarray) -> dict[int, list[str]]:
@@ -107,18 +108,57 @@ def ctfidf_terms(
     return out
 
 
+def _snippet_label(snippet: str | None, max_chars: int, max_words: int) -> str | None:
+    """Title-cased fragment of a representative snippet, used as the very last
+    resort when c-TF-IDF produced nothing usable (vocabulary collapsed to
+    stopwords, URLs, numbers, or single characters). Returns None when the
+    snippet itself has nothing word-like to show.
+    """
+    if not snippet:
+        return None
+    s = _sanitize(snippet).strip()
+    if not s:
+        return None
+    words = _WORDLIKE_RE.findall(s)
+    if not words:
+        return None
+    picked: list[str] = []
+    for w in words[: max_words * 2]:
+        picked.append(w)
+        if len(" ".join(picked)) >= max_chars or len(picked) >= max_words:
+            break
+    label = " ".join(picked).rstrip(_TRAIL_PUNCT).strip()
+    if not label:
+        return None
+    if len(label) > max_chars:
+        label = label[: max_chars - 1].rstrip() + "…"
+    return " ".join(w.capitalize() if w.isalpha() else w for w in label.split())
+
+
 def free_label_from_terms(
-    terms: list[str], cluster_id: int, max_chars: int = LABEL_MAX_CHARS, max_terms: int = 3
+    terms: list[str],
+    cluster_id: int,
+    *,
+    snippet: str | None = None,
+    max_chars: int = LABEL_MAX_CHARS,
+    max_terms: int = 3,
 ) -> str:
-    """Title-cased label from top distinctive terms. Falls back to 'Cluster N'."""
-    if not terms:
-        return f"Cluster {cluster_id}"
-    for n in range(min(max_terms, len(terms)), 0, -1):
-        label = " ".join(t.capitalize() for t in terms[:n])
-        if len(label) <= max_chars:
-            return label
-    # Even one term is too long — truncate hard.
-    return terms[0].capitalize()[: max_chars - 1] + "…"
+    """Title-cased label from top distinctive terms. When `terms` is empty,
+    falls back to a sanitized fragment of `snippet` (the cluster medoid). Only
+    if both are unusable do we return the bare 'Cluster N' — and that branch
+    should be unreachable in practice now that the medoid is always passed in.
+    """
+    if terms:
+        for n in range(min(max_terms, len(terms)), 0, -1):
+            label = " ".join(t.capitalize() for t in terms[:n])
+            if len(label) <= max_chars:
+                return label
+        return terms[0].capitalize()[: max_chars - 1] + "…"
+
+    fallback = _snippet_label(snippet, max_chars, LABEL_MAX_WORDS)
+    if fallback:
+        return fallback
+    return f"Cluster {cluster_id}"
 
 
 def _clean_llm_label(raw: str, max_chars: int, max_words: int) -> str | None:
@@ -235,7 +275,13 @@ def label_clusters(
 
     labels: dict[int, str] = {}
     for cid in grouped:
-        labels[cid] = free_label_from_terms(top_terms.get(cid, []), cid)
+        snippet = None
+        if medoid_snippets_by_cluster:
+            snips = medoid_snippets_by_cluster.get(cid) or []
+            snippet = snips[0] if snips else None
+        if snippet is None and grouped.get(cid):
+            snippet = grouped[cid][0]
+        labels[cid] = free_label_from_terms(top_terms.get(cid, []), cid, snippet=snippet)
 
     if config.OPENAI_API_KEY and medoid_snippets_by_cluster:
         for cid in grouped:

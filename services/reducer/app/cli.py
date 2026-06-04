@@ -11,7 +11,15 @@ import pandas as pd
 import typer
 
 from .config import DEFAULT_EMBED_MODEL, DEFAULT_REDUCER
-from .db import connect, ensure_project, set_status, write_results
+from .db import (
+    connect,
+    ensure_project,
+    fetch_points_for_labeling,
+    set_status,
+    update_cluster_labels,
+    write_results,
+)
+from .labeling import label_clusters
 from .pipeline import run_pipeline
 
 cli = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -198,6 +206,32 @@ def bake_static(
     typer.echo(f"reducer    : {result.reducer}")
     typer.echo(f"runtime    : {elapsed:.2f}s")
     typer.echo(f"wrote      : {out_path} ({size_mb:.2f} MiB)")
+
+
+@cli.command()
+def relabel(
+    project_id: str = typer.Argument(..., help="UUID of project to relabel"),  # noqa: B008
+) -> None:
+    """Recompute and persist cluster labels for an existing project.
+
+    Reads texts + cluster_ids straight from points, runs c-TF-IDF (+ optional
+    LLM upgrade if OPENAI_API_KEY is set), and updates clusters.label in place.
+    No embedding work, no point/edge writes — just label repair.
+    """
+    with connect() as conn:
+        texts, cluster_ids, snippets = fetch_points_for_labeling(conn, project_id)
+        if not texts:
+            typer.echo(f"project {project_id}: no points (or missing)")
+            raise typer.Exit(code=1)
+        labels = label_clusters(
+            texts, cluster_ids, medoid_snippets_by_cluster=snippets or None
+        )
+        updated = update_cluster_labels(conn, project_id, labels)
+    typer.echo(f"project {project_id}")
+    typer.echo(f"  clusters : {len(labels)}")
+    typer.echo(f"  updated  : {updated}")
+    for cid, lbl in sorted(labels.items()):
+        typer.echo(f"  {cid:>3}: {lbl}")
 
 
 def main() -> None:

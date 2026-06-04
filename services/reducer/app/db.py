@@ -251,3 +251,71 @@ def write_results(
     }
 
 
+def fetch_points_for_labeling(
+    conn: psycopg.Connection, project_id: str
+) -> tuple[list[str], np.ndarray, dict[int, list[str]]]:
+    """Return (texts, cluster_ids, medoid_snippets_by_cluster) for a project.
+
+    Used by the relabel path to recompute labels in place without re-embedding.
+    `medoid_snippets_by_cluster` is built from each cluster's recorded
+    medoid_point_id (preferred) with a high-probability fallback so the LLM
+    upgrade path still has decent input even on older rows where the medoid
+    text isn't otherwise distinguished.
+    """
+    rows = conn.execute(
+        """
+        select text, cluster_id
+        from public.points
+        where project_id = %s
+        order by id
+        """,
+        (project_id,),
+    ).fetchall()
+    texts: list[str] = []
+    cids: list[int] = []
+    for text, cid in rows:
+        texts.append(text or "")
+        cids.append(int(cid) if cid is not None else -1)
+
+    snippets: dict[int, list[str]] = {}
+    medoid_rows = conn.execute(
+        """
+        select c.cluster_id, p.text
+        from public.clusters c
+        left join public.points p on p.id = c.medoid_point_id
+        where c.project_id = %s
+        """,
+        (project_id,),
+    ).fetchall()
+    for cid, text in medoid_rows:
+        if text:
+            snippets.setdefault(int(cid), []).append(text)
+
+    return texts, np.array(cids, dtype=np.int32), snippets
+
+
+def update_cluster_labels(
+    conn: psycopg.Connection, project_id: str, labels: dict[int, str]
+) -> int:
+    """Overwrite cluster.label for the given (project_id, cluster_id) pairs.
+    Returns the number of rows updated. Tenant scoping is enforced by the
+    project_id filter; this helper runs with the service-role connection so
+    RLS is not in play here — callers must already have authorized the project.
+    """
+    if not labels:
+        return 0
+    updated = 0
+    with conn.cursor() as cur:
+        for cid, label in labels.items():
+            cur.execute(
+                """
+                update public.clusters
+                set label = %s
+                where project_id = %s and cluster_id = %s
+                """,
+                (label, project_id, int(cid)),
+            )
+            updated += cur.rowcount or 0
+    return updated
+
+

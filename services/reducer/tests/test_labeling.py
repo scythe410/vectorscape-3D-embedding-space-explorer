@@ -252,13 +252,13 @@ def test_label_clusters_degenerate_input_prefers_keyword_over_placeholder(
         )
 
 
-def test_label_clusters_truly_unlabelable_keeps_placeholder(
+def test_label_clusters_stopword_only_falls_back_to_snippet(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # All-stopword/punctuation input → CountVectorizer raises ValueError on
-    # empty vocabulary → ctfidf_terms returns {c: []} → free fallback to
-    # "Cluster N". This is the ONLY case where the numeric placeholder is
-    # acceptable.
+    # All-stopword input → CountVectorizer raises ValueError on empty
+    # vocabulary → ctfidf_terms returns {c: []}. Old behavior was to drop
+    # to bare "Cluster N"; new contract is to use the medoid snippet so the
+    # user still sees *something* from their own text in the title card.
     monkeypatch.setattr(config, "OPENAI_API_KEY", "")
 
     texts = ["the and of"] * 5 + ["a an in"] * 5
@@ -266,7 +266,25 @@ def test_label_clusters_truly_unlabelable_keeps_placeholder(
 
     labels = labeling.label_clusters(texts, cluster_ids)
     assert set(labels.keys()) == {0, 1}
-    # Documenting the contract: numeric placeholders only appear when truly
-    # no keyword can be extracted (e.g. empty vocabulary after stopwording).
+    for cid, lbl in labels.items():
+        assert lbl, f"cluster {cid} produced an empty label"
+        assert lbl != f"Cluster {cid}", (
+            f"cluster {cid} fell through to the bare numeric placeholder"
+        )
+
+
+def test_label_clusters_only_unusable_text_returns_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The single remaining case where the numeric placeholder is acceptable:
+    # every text in the cluster is genuinely empty after sanitization, so
+    # neither c-TF-IDF nor the snippet fallback has anything to show.
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+
+    texts = ["", "   ", "\t\t"] + ["", "  "]
+    cluster_ids = np.array([0, 0, 0, 1, 1], dtype=np.int32)
+
+    labels = labeling.label_clusters(texts, cluster_ids)
+    assert set(labels.keys()) == {0, 1}
     for cid, lbl in labels.items():
         assert lbl == f"Cluster {cid}"
