@@ -50,6 +50,7 @@ export default function LensViewer() {
       enterLabel="Skip intro"
       homeHref="/"
       showDatasetLink
+      searchUrl="/api/demo/search"
     />
   );
 }

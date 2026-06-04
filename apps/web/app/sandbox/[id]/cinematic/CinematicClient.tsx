@@ -68,7 +68,7 @@ export default function CinematicClient({ projectId }: Props) {
       eyebrow="Sandbox · cinematic"
       enterLabel="Explore"
       homeHref="/sandbox"
-      projectId={projectId}
+      searchUrl={`/api/projects/${projectId}/search`}
     />
   );
 }

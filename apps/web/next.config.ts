@@ -33,6 +33,17 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
   },
+  // Force the demo embeddings binary into the serverless bundle for the demo
+  // search route. Next.js' file tracer can't follow a runtime path built from
+  // process.cwd(), so without this include the file is absent at runtime on
+  // Vercel and the route 500s.
+  outputFileTracingIncludes: {
+    "/api/demo/search": [
+      "./lib/demo/skm-galaxy.embeddings.bin",
+      "./lib/demo/skm-galaxy.embeddings.meta.json",
+      "./public/demo/skm-galaxy.json",
+    ],
+  },
 };
 
 export default nextConfig;

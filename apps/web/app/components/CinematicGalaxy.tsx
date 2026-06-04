@@ -64,10 +64,11 @@ interface Props {
   /** Lens-only: surfaces a "dataset ↗" link to /lens/dataset in the bottom
    *  toolbar. Defaults to false. */
   showDatasetLink?: boolean;
-  /** Sandbox-only: enables the semantic search dropdown. Without an auth'd
-   *  project id there's no /api/projects/[id]/search to hit, so the lens
-   *  demo simply omits it. */
-  projectId?: string;
+  /** Enables the semantic search dropdown when set. Sandbox passes
+   *  `/api/projects/${id}/search` (auth'd, RLS-scoped). Lens demo passes
+   *  `/api/demo/search` (unauthenticated, pre-baked embeddings). When
+   *  undefined, the panel is hidden entirely. */
+  searchUrl?: string;
 }
 
 export default function CinematicGalaxy({
@@ -77,7 +78,7 @@ export default function CinematicGalaxy({
   enterLabel,
   homeHref,
   showDatasetLink = false,
-  projectId,
+  searchUrl,
 }: Props) {
   const [pickedIndex, setPickedIndex] = useState<number | null>(null);
   // Seed `flythroughRunning` to true so the cinematic chrome stays hidden
@@ -224,14 +225,14 @@ export default function CinematicGalaxy({
 
   const runSearch = useCallback(
     async (q: string) => {
-      if (!projectId) return;
+      if (!searchUrl) return;
       const trimmed = q.trim();
       if (!trimmed) return;
       const myReq = ++searchReqIdRef.current;
       setSearchSubmitting(true);
       setSearchError(undefined);
       try {
-        const resp = await fetch(`/api/projects/${projectId}/search`, {
+        const resp = await fetch(searchUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: trimmed }),
@@ -270,7 +271,7 @@ export default function CinematicGalaxy({
         if (myReq === searchReqIdRef.current) setSearchSubmitting(false);
       }
     },
-    [projectId, flyToSearchResults],
+    [searchUrl, flyToSearchResults],
   );
 
   const clearSearch = useCallback(() => {
@@ -585,7 +586,7 @@ export default function CinematicGalaxy({
             )}
           </section>
 
-          {projectId && (
+          {searchUrl && (
             <section className="flex flex-col overflow-hidden rounded-lg border border-white/10 bg-black/40 backdrop-blur-md">
               <header
                 className={

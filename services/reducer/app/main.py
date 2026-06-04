@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from .api import router as embed_router
 from .bridge import router as bridge_router
+from .embed_api import router as embed_primitive_router
 from .embeddings import warm_local_model
 from .search import router as search_router
 
@@ -29,6 +30,7 @@ app = FastAPI(title="VectorScape Reducer", version="0.0.0", lifespan=lifespan)
 app.include_router(embed_router)
 app.include_router(bridge_router)
 app.include_router(search_router)
+app.include_router(embed_primitive_router)
 
 
 @app.get("/health")

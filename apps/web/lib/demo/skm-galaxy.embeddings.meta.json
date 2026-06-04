@@ -1,0 +1,7 @@
+{
+  "embed_model": "all-MiniLM-L6-v2",
+  "count": 7660,
+  "dim": 384,
+  "source": "apps/web/public/demo/skm-galaxy.json",
+  "bin": "skm-galaxy.embeddings.bin"
+}
