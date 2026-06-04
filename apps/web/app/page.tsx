@@ -97,7 +97,7 @@ export default async function Home() {
       </section>
 
       <footer className="relative z-10 mx-auto max-w-6xl px-6 pb-8 text-center font-mono text-[10px] uppercase tracking-[0.22em] text-neutral-600">
-        VectorScape · v0 · WebGL2 + R3F
+        VectorScape · v1.8.0 · WebGL2 + R3F
       </footer>
     </main>
   );

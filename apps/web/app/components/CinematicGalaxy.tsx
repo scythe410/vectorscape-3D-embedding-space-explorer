@@ -357,14 +357,54 @@ export default function CinematicGalaxy({
       />
 
       {controlsOpen && !flythroughRunning && (
-        <div className="absolute right-14 top-6 z-50 w-[300px]">
+        <div className="absolute bottom-6 right-[19.5rem] z-50 w-[300px] overflow-hidden rounded-lg border border-amber-300/20 bg-black/55 shadow-[0_0_30px_-12px_rgba(252,211,77,0.25)] backdrop-blur-md">
           <LevaPanel
             store={levaStore}
             fill
             flat
             titleBar={{ title: "feel", filter: true, drag: false }}
             theme={{
-              sizes: { rootWidth: "300px", controlWidth: "150px" },
+              colors: {
+                elevation1: "rgba(0,0,0,0)",
+                elevation2: "rgba(0,0,0,0.35)",
+                elevation3: "rgba(255,255,255,0.04)",
+                accent1: "#fcd34d",
+                accent2: "#fbbf24",
+                accent3: "#f59e0b",
+                highlight1: "rgba(255,255,255,0.5)",
+                highlight2: "rgba(252,211,77,0.85)",
+                highlight3: "#fde68a",
+                vivid1: "#fcd34d",
+                folderWidgetColor: "rgba(252,211,77,0.7)",
+                folderTextColor: "rgba(252,211,77,0.9)",
+                toolTipBackground: "rgba(0,0,0,0.85)",
+                toolTipText: "#fde68a",
+              },
+              fonts: {
+                mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                sans: "ui-sans-serif, system-ui, sans-serif",
+              },
+              fontSizes: {
+                root: "11px",
+                toolTip: "11px",
+              },
+              sizes: {
+                rootWidth: "300px",
+                controlWidth: "150px",
+                titleBarHeight: "32px",
+                rowHeight: "26px",
+              },
+              radii: {
+                xs: "2px",
+                sm: "4px",
+                lg: "6px",
+              },
+              space: {
+                sm: "6px",
+                md: "8px",
+                rowGap: "6px",
+                colGap: "6px",
+              },
             }}
           />
         </div>

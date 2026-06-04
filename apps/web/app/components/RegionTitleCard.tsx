@@ -54,7 +54,7 @@ export default function RegionTitleCard({
   title,
   subtitle,
   topN = 8,
-  holdMs = 5000,
+  holdMs = 10000,
   fadeMs = 500,
   onComplete,
 }: Props) {
@@ -127,6 +127,21 @@ export default function RegionTitleCard({
     }, 1000);
     return () => clearInterval(id);
   }, [phase]);
+
+  // Enter key dismisses the card immediately.
+  useEffect(() => {
+    if (decision !== "show") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      if (completedRef.current) return;
+      e.preventDefault();
+      setPhase("dissolving");
+      setTimeout(fire, fadeMs);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decision, fadeMs]);
 
   if (decision === "skip" || done) return null;
 
