@@ -46,7 +46,6 @@ RUN uv run python -c "from sentence_transformers import SentenceTransformer; Sen
 
 # Layer 3: source + install the project itself.
 COPY --chown=user:user app ./app
-COPY --chown=user:user reducer ./reducer
 RUN uv sync --frozen --no-dev
 
 EXPOSE 7860
