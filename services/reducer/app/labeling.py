@@ -97,6 +97,12 @@ def ctfidf_terms(
     for i, c in enumerate(cluster_ids):
         order = np.argsort(-scores[i])
         picked = [str(terms[j]) for j in order[: top_k * 2] if scores[i, j] > 0][:top_k]
+        if not picked:
+            # IDF zeroed every term in this cluster (every token also occurred
+            # in every other cluster). A keyword that just isn't *distinctive*
+            # still beats a bare "Cluster N" — fall back to raw c-TF rank.
+            tf_order = np.argsort(-tf[i])
+            picked = [str(terms[j]) for j in tf_order[: top_k * 2] if tf[i, j] > 0][:top_k]
         out[c] = picked
     return out
 

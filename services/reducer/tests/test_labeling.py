@@ -210,3 +210,63 @@ def test_llm_empty_response_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
 
     out = labeling.llm_label_from_terms(["x"], ["y"])
     assert out is None
+
+
+# ---- 4. Degenerate inputs prefer keyword fallback over "Cluster N" -------
+
+def test_ctfidf_falls_back_to_raw_tf_when_every_term_overlaps() -> None:
+    # Pathological: every cluster's vocabulary is identical, so IDF zeros
+    # everything. Without the raw-TF fallback in ctfidf_terms, each cluster
+    # would get an empty term list and free_label_from_terms would emit the
+    # numeric "Cluster N" placeholder. With the fallback, each cluster still
+    # surfaces *some* keyword, even if it isn't distinctive.
+    cluster_a = ["apple banana cherry"] * 5
+    cluster_b = ["apple banana cherry"] * 5
+    cluster_c = ["apple banana cherry"] * 5
+
+    top = labeling.ctfidf_terms({0: cluster_a, 1: cluster_b, 2: cluster_c}, top_k=3)
+
+    for cid, terms in top.items():
+        assert terms, f"cluster {cid} fell through to empty terms despite TF fallback"
+        # The terms are non-distinctive but non-empty.
+        assert set(terms).issubset({"apple", "banana", "cherry"})
+
+
+def test_label_clusters_degenerate_input_prefers_keyword_over_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+
+    # Three clusters with overlapping vocabulary — IDF would zero everything.
+    # The keyword fallback should keep at least one keyword per cluster.
+    texts = ["alpha beta gamma"] * 5 + ["alpha beta gamma"] * 5 + ["alpha beta gamma"] * 5
+    cluster_ids = np.array([0] * 5 + [1] * 5 + [2] * 5, dtype=np.int32)
+
+    labels = labeling.label_clusters(texts, cluster_ids)
+
+    assert set(labels.keys()) == {0, 1, 2}
+    for cid, lbl in labels.items():
+        assert lbl, f"cluster {cid} produced an empty label"
+        assert lbl != f"Cluster {cid}", (
+            f"cluster {cid} fell through to bare placeholder despite available keywords"
+        )
+
+
+def test_label_clusters_truly_unlabelable_keeps_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # All-stopword/punctuation input → CountVectorizer raises ValueError on
+    # empty vocabulary → ctfidf_terms returns {c: []} → free fallback to
+    # "Cluster N". This is the ONLY case where the numeric placeholder is
+    # acceptable.
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "")
+
+    texts = ["the and of"] * 5 + ["a an in"] * 5
+    cluster_ids = np.array([0] * 5 + [1] * 5, dtype=np.int32)
+
+    labels = labeling.label_clusters(texts, cluster_ids)
+    assert set(labels.keys()) == {0, 1}
+    # Documenting the contract: numeric placeholders only appear when truly
+    # no keyword can be extracted (e.g. empty vocabulary after stopwording).
+    for cid, lbl in labels.items():
+        assert lbl == f"Cluster {cid}"
