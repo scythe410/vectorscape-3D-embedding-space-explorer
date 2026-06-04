@@ -156,6 +156,10 @@ const CINEMATIC_SMOOTHTIME = 0.65;
 // events on a Mac trackpad can run dolly to ~0 (stuck) or out past the fog.
 const MIN_DOLLY_DISTANCE = 2;
 const MAX_DOLLY_DISTANCE = 600;
+// Fly-to framing radii. Used when a cluster record has no `radius` (its size
+// hint is missing) and as the default for `flyToPoint(position, radius?)`.
+const DEFAULT_CLUSTER_FLY_RADIUS = 5;
+const DEFAULT_POINT_FLY_RADIUS = 3;
 
 /**
  * Top-level renderer. Owns the Canvas, fog, postprocessing, camera, and
@@ -455,7 +459,7 @@ function SceneController({
         controls.stop();
         const sphere = new THREE.Sphere(
           new THREE.Vector3(cluster.cx, cluster.cy, cluster.cz),
-          cluster.radius ?? 5,
+          cluster.radius ?? DEFAULT_CLUSTER_FLY_RADIUS,
         );
         // Cinematic smoothing just for the fly-to. The steady-state
         // smoothTime is lower so wheel-driven dolly snaps instead of drifting.
@@ -465,7 +469,7 @@ function SceneController({
           controls.smoothTime = prevSmooth;
         });
       },
-      flyToPoint: (position, radius = 3) => {
+      flyToPoint: (position, radius = DEFAULT_POINT_FLY_RADIUS) => {
         flythroughGen.bump();
         const controls = controlsRef.current;
         if (!controls) return;
@@ -485,7 +489,11 @@ function SceneController({
       resetView: () => {
         flythroughGen.bump();
         controlsRef.current?.reset(true);
-        camera.position.set(0, 0, 60);
+        camera.position.set(
+          DEFAULT_INITIAL_POSE.position[0],
+          DEFAULT_INITIAL_POSE.position[1],
+          DEFAULT_INITIAL_POSE.position[2],
+        );
       },
       setLookAt: async (position, target, enableTransition = true) => {
         const controls = controlsRef.current;
