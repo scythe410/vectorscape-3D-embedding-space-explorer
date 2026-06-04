@@ -25,19 +25,3 @@ export async function createSupabaseServerClient() {
     },
   );
 }
-
-/** Service-role client for privileged writes (RLS-bypassing). Server-only. */
-export function createSupabaseServiceClient() {
-  // Service-role lives outside SSR cookies — it has no user session.
-  // Imported lazily so the browser bundle never sees the key.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { createClient } = require("@supabase/supabase-js");
-  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
-  }
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}

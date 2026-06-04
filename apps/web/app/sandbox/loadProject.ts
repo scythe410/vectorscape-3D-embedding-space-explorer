@@ -3,7 +3,7 @@ import type { ClusterCentroid, ClusterEdge, PointsData } from "engine";
 
 import { unpackArrowBundle } from "../../lib/arrowBundle";
 
-export type ProjectMeta = { id: string; name: string; point_count: number };
+type ProjectMeta = { id: string; name: string; point_count: number };
 
 export type ClusterRow = {
   cluster_id: number;
@@ -15,7 +15,7 @@ export type ClusterRow = {
   medoid_point_id: string | null;
 };
 
-export type ClusterEdgeRow = {
+type ClusterEdgeRow = {
   cluster_a: number;
   cluster_b: number;
   similarity: number;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type SearchMatch = {
+type SearchMatch = {
   id: string;
   text: string;
   x: number;
@@ -12,7 +12,7 @@ export type SearchMatch = {
   score: number;
 };
 
-export type SearchRegion = {
+type SearchRegion = {
   cluster_id: number;
   label: string;
   count: number;

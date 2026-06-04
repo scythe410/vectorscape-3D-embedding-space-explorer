@@ -15,7 +15,7 @@ type LLMStatus = {
 // so if we later add another may-train backend, it gets its own gate.
 const GEMINI_CONSENT_KEY = "vectorscape:bridge-consent:gemini";
 
-export type BridgeExample = {
+type BridgeExample = {
   id: string;
   text: string;
   cluster_id: number;
@@ -25,7 +25,7 @@ export type BridgeExample = {
   role: "medoid" | "boundary";
 };
 
-export type BridgeResult = {
+type BridgeResult = {
   summary: string;
   cluster_a: { cluster_id: number; label: string; size: number };
   cluster_b: { cluster_id: number; label: string; size: number };

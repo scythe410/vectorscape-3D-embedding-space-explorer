@@ -21,7 +21,7 @@ export interface ProximityCentroid {
   cz: number;
 }
 
-export interface ProximityContribution {
+interface ProximityContribution {
   id: string | number;
   label: string;
   /** Normalized weight against the full centroid set, in [0, 1]. */
