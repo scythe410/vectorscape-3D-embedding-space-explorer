@@ -59,6 +59,12 @@ def auth_on(monkeypatch) -> None:
 def mock_db(monkeypatch):
     """Wire api.connect / ensure_project / set_status to fakes so the only
     real thing running is the exception path itself."""
+    # Force the sync path. /embed-reduce now defaults to always-queue so
+    # the upstream Vercel function returns fast; these tests specifically
+    # exercise the inline sync sanitization contract, which still exists
+    # behind the threshold opt-in. Bump high enough that the test payload
+    # stays under it.
+    monkeypatch.setattr(api_module, "ASYNC_ROW_THRESHOLD", 10_000)
     state: dict[str, Any] = {}
     # `connect()` is called both inside the work-tx and inside the
     # error-record path — both should land here.

@@ -1,8 +1,9 @@
-"""arq worker for long-running embed-reduce jobs.
+"""arq worker for embed-reduce jobs.
 
-Sync requests at or below ASYNC_ROW_THRESHOLD run inside the API process;
-anything above is enqueued here so the request returns immediately and the
-client polls /status/{project_id}.
+By default the API enqueues every request here so the upstream HTTP call
+returns in ms and the client polls /status/{project_id}. Set
+REDUCER_ASYNC_THRESHOLD above 0 to opt small requests back into the
+sync path inside the API process.
 
 Run with: `uv run arq app.worker.WorkerSettings`
 (or `uv run worker` via the console script).
@@ -17,12 +18,27 @@ from arq.connections import RedisSettings
 
 from .config import REDIS_URL
 from .db import connect, set_status, write_results
+from .embeddings import warm_local_model
 from .pipeline import run_pipeline
 from .progress import clear_progress, set_progress
 
 
 def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(REDIS_URL)
+
+
+async def _on_startup(ctx: dict[str, Any]) -> None:
+    """Warm-load the embedder so the first job doesn't pay the cold-load
+    cost (torch import + model weights). Mirrors the API process's
+    lifespan hook."""
+    import asyncio
+    import logging
+    try:
+        await asyncio.to_thread(warm_local_model)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "warm_local_model failed at worker startup; first job will pay the cost"
+        )
 
 
 async def embed_reduce_job(
@@ -81,6 +97,7 @@ async def embed_reduce_job(
 class WorkerSettings:
     functions = [embed_reduce_job]
     redis_settings = _redis_settings()
+    on_startup = _on_startup
     # Reducer jobs are CPU-heavy and load big ML libs; one at a time
     # per worker process keeps memory and GIL contention predictable.
     max_jobs = 1

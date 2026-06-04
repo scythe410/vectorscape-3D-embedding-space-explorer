@@ -78,6 +78,13 @@ def _get_local_model() -> SentenceTransformer:
     return _st_model
 
 
+def warm_local_model() -> None:
+    """Force the local embedder to load now. Call from API/worker startup
+    so the first /embed-reduce request doesn't pay the cold-load cost
+    (torch import + model weights, ~3–15s depending on disk cache state)."""
+    _get_local_model()
+
+
 def _embed_local(texts: list[str], batch_size: int = 64) -> np.ndarray:
     model = _get_local_model()
     vecs = model.encode(

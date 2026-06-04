@@ -23,8 +23,12 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 REDUCER_SHARED_SECRET = os.environ.get("REDUCER_SHARED_SECRET", "").strip()
 
 # Row count above which /embed-reduce hands off to the arq worker instead
-# of running inline. CLAUDE.md sets this threshold at 10k.
-ASYNC_ROW_THRESHOLD = int(os.environ.get("REDUCER_ASYNC_THRESHOLD", "10000"))
+# of running inline. Default 0 means every request queues — the API
+# returns in ms and the client polls /status. Keeps the upstream
+# (Next.js on Vercel) under its function-duration ceiling regardless of
+# dataset size. Set higher (e.g. 10000) to opt small jobs back into the
+# sync path when the worker isn't available.
+ASYNC_ROW_THRESHOLD = int(os.environ.get("REDUCER_ASYNC_THRESHOLD", "0"))
 
 CACHE_DIR = Path(
     os.environ.get("REDUCER_CACHE_DIR", str(Path.home() / ".cache" / "vectorscape" / "embeddings"))

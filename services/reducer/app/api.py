@@ -1,7 +1,8 @@
 """FastAPI routes: /embed-reduce, /status/{project_id}.
 
-Small jobs run inline; >ASYNC_ROW_THRESHOLD rows are handed to the arq
-worker and the caller polls /status to learn when it lands.
+By default every request is handed to the arq worker so the API returns
+in ms and the caller polls /status. Set REDUCER_ASYNC_THRESHOLD above 0
+to opt rows at/under that count back into the inline sync path.
 """
 from __future__ import annotations
 
