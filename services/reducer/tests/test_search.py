@@ -498,6 +498,82 @@ def test_region_summary_excludes_noise_matches(monkeypatch, auth_on) -> None:
     assert cluster_calls == []
 
 
+def test_search_logs_when_embed_model_falls_back_to_default(
+    monkeypatch, auth_on, caplog
+) -> None:
+    """A project row with a NULL/empty embed_model silently used to coerce
+    the query to MiniLM. Now that's loud: the fallback still happens, but it
+    logs a WARNING so an operator can see it. Pins the observability so a
+    future refactor can't quietly drop the log."""
+    monkeypatch.setattr(
+        search_module,
+        "embed_texts",
+        lambda texts, embed_model="x": np.zeros((len(texts), 384), dtype=np.float32),
+    )
+    # Project row exists but embed_model column is None — pre-column or
+    # manually-edited projects.
+    cursor = _FakeCursor(project_row=(None,), points_rows=[])
+    monkeypatch.setattr(search_module, "connect", lambda: _fake_connect_ctx(cursor))
+
+    with caplog.at_level("WARNING", logger="app.search"):
+        resp = _client().post(
+            "/search",
+            headers=_hdr(),
+            json={
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "tenant_id": "22222222-2222-2222-2222-222222222222",
+                "query": "anything",
+            },
+        )
+    assert resp.status_code == 200
+    # The audit principle: a degraded path must never be indistinguishable
+    # from the happy path in the logs.
+    assert any(
+        "empty embed_model" in r.message and "defaulting" in r.message
+        for r in caplog.records
+    ), caplog.text
+
+
+def test_search_logs_when_region_summary_degrades_to_dot_only(
+    monkeypatch, auth_on, caplog
+) -> None:
+    """When every matched cluster has a placeholder label, the summary
+    suppression happens silently in the response (labels_are_real=False,
+    summary=''). The reducer now emits an INFO log so operators can see
+    how often users hit the legibility-suppressed path."""
+    monkeypatch.setattr(
+        search_module,
+        "embed_texts",
+        lambda texts, embed_model="x": np.zeros((len(texts), 384), dtype=np.float32),
+    )
+    points_rows = [_points_row(f"p{i}", "t", 3) for i in range(3)]
+    cluster_rows = [(3, "Cluster 3")]
+    cursor = _FakeCursor(
+        project_row=("all-MiniLM-L6-v2",),
+        points_rows=points_rows,
+        cluster_rows=cluster_rows,
+    )
+    monkeypatch.setattr(search_module, "connect", lambda: _fake_connect_ctx(cursor))
+
+    with caplog.at_level("INFO", logger="app.search"):
+        resp = _client().post(
+            "/search",
+            headers=_hdr(),
+            json={
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "tenant_id": "22222222-2222-2222-2222-222222222222",
+                "query": "anything",
+            },
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["labels_are_real"] is False
+    assert body["summary"] == ""
+    assert any(
+        "region summary degraded" in r.message for r in caplog.records
+    ), caplog.text
+
+
 def test_search_requires_auth(monkeypatch) -> None:
     """Without the shared secret header, /search returns 401 like every other
     web→reducer route."""

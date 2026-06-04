@@ -14,6 +14,7 @@ host UI uses the (x, y, z) on each example to fly the camera to it on click.
 """
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 import psycopg
@@ -40,6 +41,8 @@ LLM_MODEL = "gpt-4o-mini"
 # Gemini equivalent, used when GEMINI_API_KEY is set instead of OPENAI_API_KEY.
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+_log = logging.getLogger(__name__)
 
 
 class LLMStatusResponse(BaseModel):
@@ -226,6 +229,12 @@ def _summarize(prompt: str) -> tuple[str, str]:
         base_url = GEMINI_BASE_URL
         model = GEMINI_MODEL
     else:
+        # No LLM key — the structural answer still ships, but log so the
+        # operator can see how often users hit the no-prose path.
+        _log.info(
+            "/bridge no-LLM-key fallback fired — set OPENAI_API_KEY or "
+            "GEMINI_API_KEY to enable prose summaries"
+        )
         return (
             "No LLM API key is set on the reducer (OPENAI_API_KEY or GEMINI_API_KEY), "
             "so no written summary was generated. The medoids and boundary points for "

@@ -74,7 +74,40 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [r + m, g + m, b + m];
 }
 
-export { clusterColor };
+export { clusterColor, isPlaceholderLabel };
+
+/**
+ * `Cluster N` shape — the placeholder a pre-labels reducer emitted, or what
+ * a NULL/empty `clusters.label` collapses to in the UI. The same shape that
+ * caused the original silent bug; we surface it once per load so a future
+ * regression can't hide.
+ */
+const PLACEHOLDER_LABEL_RE = /^cluster\s+\d+$/i;
+
+function isPlaceholderLabel(label: string | null | undefined): boolean {
+  if (label == null) return true;
+  const s = label.trim();
+  if (!s) return true;
+  return PLACEHOLDER_LABEL_RE.test(s);
+}
+
+function warnIfPlaceholderLabels(
+  projectId: string | undefined,
+  clusters: ClusterRow[],
+): void {
+  if (typeof console === "undefined" || clusters.length === 0) return;
+  const placeholders = clusters.filter((c) => isPlaceholderLabel(c.label));
+  if (placeholders.length === 0) return;
+  // Aggregated — one warning per load, regardless of how many fell back.
+  // The fallback itself is kept as a defensive default; this is the
+  // observable signal that says "the labels you're seeing are not real."
+  // Mirrors the audit principle: a degraded path must never be
+  // indistinguishable from the happy path in the logs.
+  console.warn(
+    `[vectorscape] ${placeholders.length}/${clusters.length} cluster labels are placeholders (project=${projectId ?? "?"}). ` +
+      `Labels rendered as "Cluster N" come from a NULL/empty clusters.label — either the project pre-dates the labeling pipeline (re-upload to regenerate) or label generation failed silently.`,
+  );
+}
 
 function buildCentroids(clusters: ClusterRow[]): ClusterCentroid[] {
   return clusters.map((c) => ({
@@ -162,6 +195,8 @@ function fromJson(payload: JsonPayload): LoadedProject {
   for (let i = 0; i < n; i++) idIndex.set(payload.points[i].id, i);
   const parseMs = performance.now() - t0;
 
+  warnIfPlaceholderLabels(payload.project?.id, payload.clusters);
+
   return {
     project: payload.project,
     pointsData: { position, color, size, probability },
@@ -238,6 +273,8 @@ function fromArrowBundle(buf: ArrayBuffer): LoadedProject {
     return m;
   };
   const parseMs = performance.now() - t0;
+
+  warnIfPlaceholderLabels(meta.project?.id, meta.clusters);
 
   return {
     project: meta.project,

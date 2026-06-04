@@ -13,6 +13,7 @@ with the project_id so /search can't be tricked into crossing tenants.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import numpy as np
@@ -42,6 +43,8 @@ REGION_TOP_N = 3
 # dot-highlight-only when every matched cluster's label is a placeholder —
 # naming "Cluster 3" tells the user nothing the dots don't already.
 _PLACEHOLDER_RE = re.compile(r"^cluster\s+\d+$", re.IGNORECASE)
+
+_log = logging.getLogger(__name__)
 
 
 class SearchRequest(BaseModel):
@@ -111,7 +114,20 @@ def _fetch_project_embed_model(
     ).fetchone()
     if not row:
         return None
-    return row[0] or DEFAULT_EMBED_MODEL
+    stored = row[0]
+    if not stored:
+        # The project's embed_model column is null/empty — projects predating
+        # the column or manually-edited rows. We embed the query with the
+        # default model, which matches what the reducer actually used at
+        # write-time (also the default). Loud so the operator notices if
+        # this ever fires for a project that *did* use a non-default model.
+        _log.warning(
+            "search: project %s has empty embed_model — defaulting to %s",
+            project_id,
+            DEFAULT_EMBED_MODEL,
+        )
+        return DEFAULT_EMBED_MODEL
+    return stored
 
 
 def _search_points(
@@ -225,6 +241,14 @@ def _summarize_regions(
         regions.append(Region(cluster_id=cid, label=label, count=count))
 
     if not labels_are_real:
+        # Region summary degrades to dot-highlight-only when every matched
+        # cluster's label is a "Cluster N" placeholder. Log so the operator
+        # can see how often the summary is silently empty for real users.
+        _log.info(
+            "search: region summary degraded to dot-only — "
+            "every matched cluster has a placeholder label (clusters=%s)",
+            [r.cluster_id for r in regions],
+        )
         return regions, False, ""
 
     # Compose the summary only from regions whose labels aren't placeholders.

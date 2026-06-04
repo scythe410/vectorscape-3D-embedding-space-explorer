@@ -61,6 +61,13 @@ export default function BridgePanel({
   const reqIdRef = useRef(0);
 
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
+  // `null` = not fetched yet, `"ok"` = fetched, `"failed"` = fetch errored.
+  // Distinguishing the unknown-vs-failed states lets us pause the auto-fire
+  // for users who might otherwise hit a may-train backend without seeing
+  // the consent prompt.
+  const [llmStatusState, setLlmStatusState] = useState<
+    "unknown" | "ok" | "failed"
+  >("unknown");
   const [consented, setConsented] = useState(false);
 
   // Pull provider info once; the user can't change it from the UI.
@@ -69,12 +76,21 @@ export default function BridgePanel({
     void (async () => {
       try {
         const r = await fetch("/api/llm-status", { cache: "no-store" });
-        if (!r.ok || cancelled) return;
+        if (cancelled) return;
+        if (!r.ok) {
+          setLlmStatusState("failed");
+          return;
+        }
         const body = (await r.json()) as LLMStatus;
-        if (!cancelled) setLlmStatus(body);
+        if (cancelled) return;
+        setLlmStatus(body);
+        setLlmStatusState("ok");
       } catch {
-        // Non-fatal: if status fails we behave as if no consent gate applies,
-        // and the bridge call will surface any real error itself.
+        // If we can't tell which provider is live, we cannot prove the
+        // consent gate is unnecessary — keep the panel paused and let the
+        // user decide. Better than silently shipping data to a may-train
+        // backend.
+        if (!cancelled) setLlmStatusState("failed");
       }
     })();
     return () => {
@@ -94,6 +110,11 @@ export default function BridgePanel({
 
   const needsConsent =
     llmStatus?.may_train_on_data === true && !consented;
+
+  // When llm-status failed we don't know whether the active backend trains
+  // on data — pause auto-bridge until the user opts in via the explicit
+  // notice. Mirrors the consent-gate behavior but for the "unknown" path.
+  const statusFailed = llmStatusState === "failed" && !consented;
 
   const grantConsent = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -137,13 +158,13 @@ export default function BridgePanel({
       reqIdRef.current++;
       return;
     }
-    if (needsConsent) {
+    if (needsConsent || statusFailed) {
       setState({ kind: "idle" });
       return;
     }
     const [a, b] = selection;
     void runBridge(a, b);
-  }, [selection, runBridge, needsConsent]);
+  }, [selection, runBridge, needsConsent, statusFailed]);
 
   const onCitedClick = (ex: BridgeExample) => {
     handleRef.current?.flyToPoint([ex.x, ex.y, ex.z], 2.5);
@@ -194,23 +215,26 @@ export default function BridgePanel({
                 onAccept={grantConsent}
               />
             )}
-            {!needsConsent && state.kind === "loading" && (
+            {!needsConsent && statusFailed && (
+              <LLMStatusUnknownGate onContinue={grantConsent} />
+            )}
+            {!needsConsent && !statusFailed && state.kind === "loading" && (
               <div className="text-xs text-neutral-500">
                 Pulling medoids and boundary points…
               </div>
             )}
-            {!needsConsent && state.kind === "error" && (
+            {!needsConsent && !statusFailed && state.kind === "error" && (
               <div className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
                 {state.message}
               </div>
             )}
-            {!needsConsent && state.kind === "ready" && (
+            {!needsConsent && !statusFailed && state.kind === "ready" && (
               <BridgeReadout
                 result={state.result}
                 onCitedClick={onCitedClick}
               />
             )}
-            {!needsConsent && llmStatus?.may_train_on_data === true && (
+            {!needsConsent && !statusFailed && llmStatus?.may_train_on_data === true && (
               <TrainingDataFootnote model={llmStatus.model} />
             )}
           </div>
@@ -249,6 +273,35 @@ function GeminiConsentGate({
         className="mt-1 rounded-md border border-amber-700/60 bg-amber-900/40 px-2 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-900/70"
       >
         I understand — continue
+      </button>
+    </div>
+  );
+}
+
+function LLMStatusUnknownGate({ onContinue }: { onContinue: () => void }) {
+  // The /api/llm-status fetch failed. We can't tell whether the active
+  // backend is OpenAI (no-train), Gemini free-tier (may-train), or the
+  // no-key fallback. Pre-audit, this branch silently disabled the consent
+  // gate — a user clicking Bridge could send data to a may-train backend
+  // without seeing the prompt. This gate makes the unknown state loud.
+  return (
+    <div className="space-y-2 rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-100">
+      <div className="font-medium text-amber-200">
+        LLM status unknown
+      </div>
+      <p className="leading-relaxed text-amber-100/90">
+        We couldn&apos;t reach the LLM-status endpoint, so we don&apos;t know
+        which provider would summarize your bridge. If the active backend is
+        a may-train free tier (e.g. Google AI Studio), the cluster snippets
+        we send could be used to improve models. Don&apos;t bridge
+        confidential data from this state.
+      </p>
+      <button
+        type="button"
+        onClick={onContinue}
+        className="mt-1 rounded-md border border-amber-700/60 bg-amber-900/40 px-2 py-1 text-[11px] font-medium text-amber-100 hover:bg-amber-900/70"
+      >
+        I understand — continue anyway
       </button>
     </div>
   );

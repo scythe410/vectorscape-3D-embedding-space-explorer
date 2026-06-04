@@ -98,7 +98,12 @@ export async function GET(
     .eq("project_id", id)
     .order("similarity", { ascending: false });
   if (edgesErr) {
-    // Don't fail the whole response on a missing optional table.
+    // Don't fail the whole response on a missing optional table — but log
+    // it, otherwise a real DB-side error reads identically to "no edges
+    // computed yet" and a regression silently empties the links overlay.
+    console.warn(
+      `[data/route] cluster_edges fetch failed for project ${id}: ${edgesErr.message}`,
+    );
     edgeRows = [];
   } else {
     edgeRows = (edges ?? []) as ClusterEdgeRow[];

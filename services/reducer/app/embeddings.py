@@ -153,7 +153,19 @@ def embed_texts(texts: list[str], embed_model: str = DEFAULT_EMBED_MODEL) -> np.
     if not texts:
         return np.zeros((0, EMBED_DIM), dtype=np.float32)
 
-    use_openai = embed_model.lower() == "openai"
+    requested = (embed_model or "").strip()
+    use_openai = requested.lower() == "openai"
+    # A degraded path must never be indistinguishable from the happy path in
+    # the logs. Any non-empty embed_model that isn't 'openai' or the default
+    # local model is silently coerced to local MiniLM — emit a warning so the
+    # operator can find it instead of wondering why search/cluster geometry
+    # changed.
+    if not use_openai and requested and requested != DEFAULT_EMBED_MODEL:
+        _log.warning(
+            "embed_texts: unknown embed_model=%r coerced to local %s",
+            requested,
+            DEFAULT_EMBED_MODEL,
+        )
     model_key = OPENAI_MODEL if use_openai else DEFAULT_EMBED_MODEL
 
     digests = [_hash_text(model_key, t) for t in texts]
