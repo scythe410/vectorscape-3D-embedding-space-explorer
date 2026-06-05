@@ -223,7 +223,29 @@ export default function SandboxUI() {
         .from("csv-uploads")
         .upload(objectPath, preview.file, { contentType: "text/csv", upsert: false });
       if (up.error) {
-        setSubmitError(`storage upload failed: ${up.error.message}`);
+        // storage-js collapses unparseable error bodies to "HTTP <status> error";
+        // surface every available field so the next failure tells us *why*.
+        const err = up.error as Error & { status?: number; statusCode?: string; name?: string };
+        const sizeKb = Math.round(preview.file.size / 1024);
+        // eslint-disable-next-line no-console
+        console.error("[sandbox] storage upload failed", {
+          path: objectPath,
+          fileSizeBytes: preview.file.size,
+          fileType: preview.file.type,
+          error: err,
+          message: err.message,
+          status: err.status,
+          statusCode: err.statusCode,
+          name: err.name,
+        });
+        const bits = [err.message || "unknown error"];
+        if (err.status) bits.push(`status=${err.status}`);
+        if (err.statusCode && String(err.statusCode) !== String(err.status)) {
+          bits.push(`code=${err.statusCode}`);
+        }
+        if (err.name && err.name !== "StorageApiError") bits.push(err.name);
+        bits.push(`${sizeKb} KB`);
+        setSubmitError(`storage upload failed: ${bits.join(" · ")}`);
         return;
       }
 
