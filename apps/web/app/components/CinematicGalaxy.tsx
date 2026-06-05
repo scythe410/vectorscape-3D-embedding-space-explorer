@@ -86,6 +86,8 @@ export default function CinematicGalaxy({
   // intro-fire would flash the panels for one frame.
   const [flythroughRunning, setFlythroughRunning] = useState(true);
   const [hqMode, setHqMode] = useState(false);
+  const [edgesEnabled, setEdgesEnabled] = useState(false);
+  const [hoveredEdge, setHoveredEdge] = useState<{ a: number; b: number } | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [constellationsOpen, setConstellationsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -338,6 +340,14 @@ export default function CinematicGalaxy({
         }}
         onPointPick={(index) => setPickedIndex(index >= 0 ? index : null)}
         onCameraMove={onCameraMove}
+        edges={edgesEnabled ? loaded.edges : undefined}
+        onEdgeHover={setHoveredEdge}
+        onEdgeClick={(e) => {
+          setHoveredEdge(null);
+          handleRef.current?.cancelFlythrough();
+          setFlythroughRunning(false);
+          handleRef.current?.flyTo(e.a);
+        }}
       />
 
       {!flythroughRunning && (
@@ -460,12 +470,29 @@ export default function CinematicGalaxy({
 
       {/* Bottom-left toolbar. */}
       <div className="pointer-events-none absolute bottom-6 left-6 flex flex-col items-start gap-2">
-        <a
-          href={homeHref}
-          className="pointer-events-auto rounded-full border border-white/10 bg-black/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-neutral-300 backdrop-blur-md transition hover:border-amber-300/60 hover:text-amber-200"
-        >
-          ← home
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href={homeHref}
+            className="pointer-events-auto rounded-full border border-white/10 bg-black/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-neutral-300 backdrop-blur-md transition hover:border-amber-300/60 hover:text-amber-200"
+          >
+            ← home
+          </a>
+          {!flythroughRunning && loaded.edges.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setEdgesEnabled((v) => !v)}
+              className={
+                "pointer-events-auto rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] backdrop-blur-md transition " +
+                (edgesEnabled
+                  ? "border-amber-300/60 bg-amber-300/10 text-amber-200"
+                  : "border-white/10 bg-black/40 text-neutral-300 hover:border-white/25 hover:text-neutral-100")
+              }
+              title="Faint lines between the most semantically-similar cluster pairs (computed in embedding space). Hover a line to preview, click to fly there."
+            >
+              {edgesEnabled ? `links · ${loaded.edges.length}` : "links"}
+            </button>
+          )}
+        </div>
         {!flythroughRunning && (
           <div className="flex items-center gap-3">
             <div className="rounded-md border border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px] text-neutral-400 backdrop-blur-md">
@@ -498,6 +525,25 @@ export default function CinematicGalaxy({
           </div>
         )}
       </div>
+
+      {/* Hover-only edge label. Only mounted when an edge is actively
+          hovered AND edges are on; otherwise edges read as pure shape. */}
+      {edgesEnabled && hoveredEdge && (
+        <div className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 rounded-full border border-amber-300/40 bg-black/60 px-4 py-1.5 backdrop-blur-md">
+          <div className="flex items-baseline gap-2 font-mono text-[10px] uppercase tracking-[0.22em] text-amber-200/90">
+            <span className="text-neutral-200">
+              {loaded.centroids.find((c) => Number(c.id) === hoveredEdge.a)?.label ??
+                `Cluster ${hoveredEdge.a}`}
+            </span>
+            <span className="text-neutral-500">↔</span>
+            <span className="text-neutral-200">
+              {loaded.centroids.find((c) => Number(c.id) === hoveredEdge.b)?.label ??
+                `Cluster ${hoveredEdge.b}`}
+            </span>
+            <span className="ml-1 text-[9px] text-neutral-500">click to fly</span>
+          </div>
+        </div>
+      )}
 
       {/* Right rail: constellations + selection. Hidden during intro. */}
       {!flythroughRunning && (
