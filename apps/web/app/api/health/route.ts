@@ -22,16 +22,20 @@ export async function GET() {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 3000);
-    // /auth/v1/health is unauthenticated and returns fast when the project is
-    // live. A paused project fails DNS resolution and throws here.
-    const resp = await fetch(`${url}/auth/v1/health`, {
+    // Reachability probe: what we're detecting is a paused project, whose
+    // subdomain stops resolving (DNS NXDOMAIN) so fetch THROWS. A live project
+    // returns *some* HTTP status through the gateway — even a 401 for the
+    // missing apikey — which means it's up. So any response == reachable; only
+    // a thrown error means unavailable. (Don't check resp.ok: the gateway 401s
+    // /auth/v1/* without an apikey and that would false-positive the banner.)
+    await fetch(`${url}/auth/v1/health`, {
       method: "GET",
       cache: "no-store",
       signal: controller.signal,
     });
     clearTimeout(t);
     return NextResponse.json<HealthStatus>(
-      { ok: resp.ok },
+      { ok: true },
       {
         status: 200,
         headers: { "Cache-Control": "no-store" },
