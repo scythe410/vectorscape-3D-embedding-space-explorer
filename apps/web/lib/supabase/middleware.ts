@@ -26,8 +26,17 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Touch the session so cookies refresh.
-  await supabase.auth.getUser();
+  // Touch the session so cookies refresh. Fail open: if Supabase is
+  // unreachable or slow, never block the request — an unrefreshed session is
+  // far better than 504-ing the entire site (incl. pages that need no auth).
+  try {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("supabase auth timeout")), 3000),
+    );
+    await Promise.race([supabase.auth.getUser(), timeout]);
+  } catch {
+    // Swallow: cookies just won't refresh this request.
+  }
 
   return response;
 }

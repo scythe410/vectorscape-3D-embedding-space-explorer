@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, DM_Sans, JetBrains_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+import BackendStatusBanner from "./components/BackendStatusBanner";
 import "./globals.css";
 
 // Design system per design.md — characterful display, quiet body, precise mono.
@@ -57,6 +58,7 @@ export default function RootLayout({
         code. Suppressing it on body only is the React-recommended workaround.
       */}
       <body className="font-body" suppressHydrationWarning>
+        <BackendStatusBanner />
         {children}
         <Analytics />
       </body>
